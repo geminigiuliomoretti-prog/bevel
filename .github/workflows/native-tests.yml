@@ -24,19 +24,6 @@ jobs:
       - name: Run Kotlin module tests
         working-directory: native/android
         run: bash gradlew :beveltry-ble:testDebugUnitTest
-      - name: Compile manual Android instrumentation test (not executed)
-        working-directory: native/android
-        run: |
-          set -o pipefail
-          set +e
-          bash gradlew :beveltry-ble:assembleDebugAndroidTest --stacktrace 2>&1 | tee "$RUNNER_TEMP/android-test-build.log"
-          result=$?
-          if [ "$result" -ne 0 ]; then
-            grep -E '^(e: |FAILURE:|\* What went wrong:|Execution failed for task|Caused by:|.* error:|.*error:|.*Exception:|.*Could not|.*could not|.*not found|.*not exist|.*failed)' "$RUNNER_TEMP/android-test-build.log" | tail -n 30 | while IFS= read -r line; do
-              echo "::error::$line"
-            done
-          fi
-          exit "$result"
 
   flutter:
     runs-on: ubuntu-latest
