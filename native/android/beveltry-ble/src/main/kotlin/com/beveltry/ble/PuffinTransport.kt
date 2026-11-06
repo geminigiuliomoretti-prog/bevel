@@ -15,3 +15,6 @@ interface PuffinTransport {
     suspend fun subscribe(characteristic: PuffinCharacteristic)
     fun incomingFrames(): Flow<Pair<PuffinFrame, PuffinCharacteristic>>
 }
+
+/** Segnala che il trasporto conferma autonomamente ogni frame storico 0x31. */
+interface PuffinAutoAcknowledgingTransport

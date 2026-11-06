@@ -174,7 +174,9 @@ class PuffinHandshake(
             val ackSequence = nextSequence()
             val cursor = metadata.rawPayload.copyOfRange(13, 21)
             val ackPayload = byteArrayOf(0x23, ackSequence.toByte(), 0x17, 0x01) + cursor
-            transport.write(encode(ackPayload), PuffinCharacteristic.CMD_TO_STRAP)
+            if (transport !is PuffinAutoAcknowledgingTransport) {
+                transport.write(encode(ackPayload), PuffinCharacteristic.CMD_TO_STRAP)
+            }
             transition(HandshakeState.OffloadStarted)
         } catch (error: PuffinHandshakeError) {
             fail(error)
