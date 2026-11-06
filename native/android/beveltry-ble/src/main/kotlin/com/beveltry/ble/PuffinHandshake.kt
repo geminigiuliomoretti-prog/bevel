@@ -123,7 +123,10 @@ class PuffinHandshake(
 
             transition(HandshakeState.SendingHello)
             val helloSequence = nextSequence()
-            sendAndAcknowledge(byteArrayOf(0x23, helloSequence.toByte(), 0x91.toByte(), 0x01), 0x91, helloSequence, inbox)
+            sendAndAcknowledge(
+                byteArrayOf(0x23, helloSequence.toByte(), 0x91.toByte(), 0x01),
+                0x91, helloSequence, inbox, field = 0x0100,
+            )
 
             transition(HandshakeState.ReadingClock)
             readClock(inbox)
@@ -210,10 +213,11 @@ class PuffinHandshake(
         opcode: Int,
         seq: Int,
         inbox: Channel<Pair<PuffinFrame, PuffinCharacteristic>>,
+        field: Int = 1,
         retryOnce: Boolean = false,
         returnFrame: Boolean = false,
     ): PuffinFrame? {
-        val frame = encode(payload)
+        val frame = PuffinFrameCodec.encode(field, payload)
         var lastError: PuffinHandshakeError = PuffinHandshakeError.AckTimeout(opcode)
         repeat(if (retryOnce) 2 else 1) { attempt ->
             if (attempt > 0) kotlinx.coroutines.currentCoroutineContext().ensureActive()
