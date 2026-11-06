@@ -31,8 +31,9 @@ public enum PuffinFrameCodec {
 
     public static func decode(_ frame: Data) throws -> PuffinFrame {
         guard frame.count >= 2 else { throw PuffinFrameError.frameTooShort }
-        guard frame[frame.startIndex] == 0xAA else { throw PuffinFrameError.invalidSOF }
-        guard frame[frame.startIndex + 1] == 0x01 else { throw PuffinFrameError.invalidVersion }
+        let start = frame.startIndex
+        guard frame[start] == 0xAA else { throw PuffinFrameError.invalidSOF }
+        guard frame[start + 1] == 0x01 else { throw PuffinFrameError.invalidVersion }
         guard frame.count >= headerSize else { throw PuffinFrameError.frameTooShort }
 
         let payloadLength = Int(readU16(frame, 2))
@@ -49,7 +50,8 @@ public enum PuffinFrameCodec {
         }
 
         let rawPayloadLength = payloadLength - 4
-        let rawPayload = Data(frame[8..<(8 + rawPayloadLength)])
+        let payloadStart = start + headerSize
+        let rawPayload = Data(frame[payloadStart..<(payloadStart + rawPayloadLength)])
         let expectedPayloadCRC = CRC.crc32IEEE(rawPayload)
         let actualPayloadCRC = readU32(frame, 8 + rawPayloadLength)
         guard expectedPayloadCRC == actualPayloadCRC else {
@@ -77,12 +79,14 @@ public enum PuffinFrameCodec {
     }
 
     fileprivate static func readU16(_ data: Data, _ offset: Int) -> UInt16 {
-        UInt16(data[offset]) | (UInt16(data[offset + 1]) << 8)
+        let index = data.startIndex + offset
+        return UInt16(data[index]) | (UInt16(data[index + 1]) << 8)
     }
 
     fileprivate static func readU32(_ data: Data, _ offset: Int) -> UInt32 {
-        UInt32(data[offset]) | (UInt32(data[offset + 1]) << 8)
-            | (UInt32(data[offset + 2]) << 16) | (UInt32(data[offset + 3]) << 24)
+        let index = data.startIndex + offset
+        return UInt32(data[index]) | (UInt32(data[index + 1]) << 8)
+            | (UInt32(data[index + 2]) << 16) | (UInt32(data[index + 3]) << 24)
     }
 }
 
@@ -106,7 +110,7 @@ public final class PuffinFrameReassembler {
             }
             if start > 0 { buffer.removeFirst(start) }
             guard buffer.count >= 2 else { break }
-            guard buffer[1] == 0x01 else { buffer.removeFirst(); continue }
+            guard buffer[buffer.startIndex + 1] == 0x01 else { buffer.removeFirst(); continue }
             guard buffer.count >= 8 else { break }
 
             let declaredLength = Int(PuffinFrameCodec.readU16(buffer, 2))
@@ -135,8 +139,12 @@ public final class PuffinFrameReassembler {
 
     private func findSOF(in data: Data) -> Int? {
         guard data.count >= 2 else { return nil }
-        for index in 0..<(data.count - 1) where data[index] == 0xAA && data[index + 1] == 0x01 {
-            return index
+        var index = data.startIndex
+        while index + 1 < data.endIndex {
+            if data[index] == 0xAA && data[index + 1] == 0x01 {
+                return index - data.startIndex
+            }
+            index += 1
         }
         return nil
     }
