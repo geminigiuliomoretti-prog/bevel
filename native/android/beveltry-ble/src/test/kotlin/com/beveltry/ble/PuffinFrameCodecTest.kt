@@ -11,10 +11,19 @@ class PuffinFrameCodecTest {
         0x23, 1, 0x91.toByte(), 1, 0x36, 0x3E, 0x5C, 0x8D.toByte(),
     )
 
+    @Test fun diagnosticHelloFrame() {
+        val payload = byteArrayOf(0x23, 0x01, 0x91.toByte(), 0x01)
+        val fieldOne = PuffinFrameCodec.encode(0x0001, payload)
+        assertEquals("01 00", fieldOne.copyOfRange(4, 6).toHex())
+        assertArrayEquals(hello, PuffinFrameCodec.encode(0x0100, payload))
+    }
+
+    private fun ByteArray.toHex(): String = joinToString(" ") { "%02X".format(it) }
+
     @Test fun knownHelloEncodeAndDecode() {
-        assertArrayEquals(hello, PuffinFrameCodec.encode(1, byteArrayOf(0x23, 1, 0x91.toByte(), 1)))
+        assertArrayEquals(hello, PuffinFrameCodec.encode(0x0100, byteArrayOf(0x23, 1, 0x91.toByte(), 1)))
         val frame = PuffinFrameCodec.decode(hello)
-        assertEquals(1, frame.field)
+        assertEquals(0x0100, frame.field)
         assertArrayEquals(byteArrayOf(0x23, 1, 0x91.toByte(), 1), frame.payload)
         assertArrayEquals(frame.payload, frame.rawPayload)
     }
