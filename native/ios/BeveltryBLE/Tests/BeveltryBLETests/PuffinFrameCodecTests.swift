@@ -7,9 +7,9 @@ final class PuffinFrameCodecTests: XCTestCase {
                               0x23, 0x01, 0x91, 0x01, 0x36, 0x3E, 0x5C, 0x8D])
 
     func testKnownHelloEncodeAndDecode() throws {
-        XCTAssertEqual(try PuffinFrameCodec.encode(field: 1, payload: Data([0x23, 0x01, 0x91, 0x01])), hello)
+        XCTAssertEqual(try PuffinFrameCodec.encode(field: 0x0100, payload: Data([0x23, 0x01, 0x91, 0x01])), hello)
         let decoded = try PuffinFrameCodec.decode(hello)
-        XCTAssertEqual(decoded.field, 1)
+        XCTAssertEqual(decoded.field, 0x0100)
         XCTAssertEqual(decoded.payload, Data([0x23, 0x01, 0x91, 0x01]))
         XCTAssertEqual(decoded.rawPayload, decoded.payload)
     }

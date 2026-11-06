@@ -106,7 +106,7 @@ public final class PuffinHandshake {
             let helloSequence = nextSequence()
             try await sendAndAcknowledge(
                 payload: [0x23, helloSequence, 0x91, 0x01], opcode: 0x91, sequence: helloSequence,
-                reader: reader
+                reader: reader, field: 0x0100
             )
 
             transition(.readingClock)
@@ -205,9 +205,10 @@ public final class PuffinHandshake {
     @discardableResult
     private func sendAndAcknowledge(
         payload: [UInt8], opcode: UInt8, sequence: UInt8, reader: FrameIteratorBox,
+        field: UInt16 = Self.field,
         retryOnce: Bool = false, returnsFrame: Bool = false
     ) async throws -> PuffinFrame? {
-        let frame = try encode(payload)
+        let frame = try encode(payload, field: field)
         var lastError: PuffinHandshakeError = .ackTimeout(opcode: opcode)
         for attempt in 0..<(retryOnce ? 2 : 1) {
             if attempt > 0 { try Task.checkCancellation() }
@@ -270,8 +271,8 @@ public final class PuffinHandshake {
         }
     }
 
-    private func encode(_ payload: [UInt8]) throws -> Data {
-        try PuffinFrameCodec.encode(field: Self.field, payload: Data(payload))
+    private func encode(_ payload: [UInt8], field: UInt16 = Self.field) throws -> Data {
+        try PuffinFrameCodec.encode(field: field, payload: Data(payload))
     }
 
     private func nextSequence() -> UInt8 {
