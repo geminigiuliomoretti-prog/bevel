@@ -104,6 +104,58 @@ La gestione termina nello stato `offloadStarted` dopo l'ACK `0x17` del primo `0x
 
 I dettagli non elencati per questi layout restano da determinare su campioni verificati.
 
+## Decoder Dart (Livello 3)
+
+I decoder puri Dart si trovano in `app/lib/src/records/`. Ricevono il payload interno del frame Puffin, senza l'envelope, e usano offset relativi al byte 0 del payload. I valori multi-byte sono little-endian. Non modificano il buffer ricevuto e rifiutano payload troppo corti o type/version non supportati con `RecordDecodeException`.
+
+### V18Record (`0x2F`, versione `0x12`, 124 byte)
+
+| Offset payload | Tipo | Campo | Interpretazione |
+|---:|---|---|---|
+| 2–3 | u16 | `seq` | Sequenza |
+| 7–10 | u32 | `timestampSeconds` | Unix seconds, esposto come `DateTime` UTC |
+| 14 | u8 | `hrPrimary` | BPM; `0` indica off-wrist |
+| 15 | u8 | `rrCount` | Da 0 a 4 |
+| 16–23 | 4×u16 | `rrIntervalsMs` | Millisecondi diretti; sono esposti solo i primi `rrCount` valori |
+| 29 | u8 | `hrSecondary` | HR smoothed |
+| 33–44 | 3×f32 | `gravityXyz` | X, Y, Z in g |
+| 45–60 | 4×f32 | `quaternionWxyz` | Ordine W, X, Y, Z |
+| 57–58 | u16 | `stepCounter` | Sperimentale e nullable; ricade nei byte del quaternion Z |
+| 60–61 | i16 | `skinTempRaw` | Sperimentale e nullable; valore grezzo, `/10` °C è un'interpretazione da verificare |
+| 62 | u8 | `sleepState` | Sperimentale e nullable; `2` è la lettura proposta per asleep |
+| 82 | u8 | `spo2Candidate` | Byte grezzo, non è una misura SpO₂ |
+| 104 | u8 | marker | Valore riportato `0x01` |
+| 106–107 | u16 | `opticalBaseline` | Grezzo |
+| 108–109 | 2×u8 | `opticalAmpA/B` | Grezzi |
+| 113–116 | f32 | `unknownF32` | Sperimentale e nullable; valore non finito esposto come `null` |
+
+La sovrapposizione tra quaternion (45–60), `stepCounter` (57–58) e `skinTempRaw` (60–61) è ambigua e va verificata su hardware. `stepCounter`, `skinTempRaw`, `sleepState` e `unknownF32` non sono validati byte-per-byte e non vanno usati per logica critica. I test ancorano il quaternion e la gravità e controllano separatamente che le letture sperimentali non causino errori. La mappatura usata qui è relativa al payload interno e segue la specifica Beveltry; mappe pubbliche con offset del frame completo o layout differenti non vanno trasposte senza una cattura di riferimento.
+
+`spo2Candidate` all'offset 82 è `0x00` senza entitlement. Il decoder lo conserva come byte grezzo e non tenta di ricavarne SpO₂.
+
+### V26Record (`0x2F`, versione `0x1A`, 88 byte)
+
+| Offset payload | Tipo | Campo | Interpretazione |
+|---:|---|---|---|
+| 27–74 | 24×i16 | `ppgSamples` | Campioni signed little-endian di un singolo canale PPG AC-coupled a 24 Hz |
+
+Il buffer non rappresenta canali Red/IR intercalati e non consente di calcolare SpO₂.
+
+### Live28Record (`0x28`, versione `0x02`, 12 byte)
+
+| Offset payload | Tipo | Campo | Interpretazione |
+|---:|---|---|---|
+| 2–5 | u32 | `timestampSeconds` | Unix seconds, esposto come `DateTime` UTC |
+| 8 | u8 | `hr` | BPM |
+| 9 | u8 | `validity` | `0` off-wrist, `1` HR+RR, `2` HR+RR+extra |
+| 10–11 | u16 | `rrIntervalMs` | Millisecondi diretti |
+
+### StandardHrRecord (`0x2A37`)
+
+Il payload non contiene type/version. Byte 0 è `flags`; bit 0 seleziona HR u8/u16, bit 3 indica il campo energy-expended u16, bit 4 indica gli intervalli R-R u16 successivi. I valori u16 sono letti little-endian. Per il profilo WHOOP usato da questo progetto, gli R-R vengono esposti in millisecondi senza conversione `1/1024 s`.
+
+`RecordDecoder` instrada `0x2F/0x12` a V18, `0x2F/0x1A` a V26 e `0x28/0x02` a Live28. `0x2A37` viene decodificato chiamando direttamente `StandardHrRecord.decode` sulla caratteristica standard.
+
 ## Note operative e mitigazioni future
 
 - Deduplicare con `(record_index, timestamp_epoch, beat_ordinal)`; deduplicare solo per timestamp è stato associato a re-delivery e over-count riportato di 2,53×.
