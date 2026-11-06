@@ -28,6 +28,7 @@ jobs:
         working-directory: native/android
         run: |
           set -o pipefail
+          set +e
           bash gradlew :beveltry-ble:assembleDebugAndroidTest --stacktrace 2>&1 | tee "$RUNNER_TEMP/android-test-build.log"
           result=$?
           if [ "$result" -ne 0 ]; then
