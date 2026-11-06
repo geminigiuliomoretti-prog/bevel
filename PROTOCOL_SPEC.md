@@ -25,7 +25,7 @@ Tutti i campi multi-byte sono little-endian. Il frame ha header da 8 byte, paylo
 | 0 | SOF | `0xAA` |
 | 1 | Versione | `0x01` |
 | 2–3 | `payloadLen` | byte del payload paddato più 4 byte del CRC32 |
-| 4–5 | `field` | u16; `0x0001` è il valore dell'esempio |
+| 4–5 | `field` | u16 little-endian; nel frame CLIENT_HELLO di riferimento vale `0x0100` |
 | 6–7 | CRC16 header | CRC-16/MODBUS sui byte 0–5 |
 | 8… | payload interno | padding zero fino a multiplo di 4 |
 | ultimi 4 | CRC32 | CRC-32 IEEE sul payload paddato soltanto |
@@ -42,7 +42,7 @@ Frame statico riportato come verificato su hardware:
 AA 01 08 00 00 01 E6 71 23 01 91 01 36 3E 5C 8D
 ```
 
-Scomposizione: SOF `AA`, versione `01`, `payloadLen=0x0008`, field `0x0001`, CRC16 `0x71E6` (wire `E6 71`), payload `23 01 91 01`, CRC32 `0x8D5C3E36` (wire `36 3E 5C 8D`). L'encoder deve produrre questi byte per field `1` e payload `[23, 01, 91, 01]`.
+Scomposizione: SOF `AA`, versione `01`, `payloadLen=0x0008`, field wire `00 01` (u16 little-endian `0x0100`), CRC16 `0x71E6` (wire `E6 71`), payload `23 01 91 01`, CRC32 `0x8D5C3E36` (wire `36 3E 5C 8D`). Il frame statico è il riferimento per CLIENT_HELLO: prevale sul valore `0x0001` riportato nel PDF e nelle note precedenti. L'encoder deve produrre questi byte per field `0x0100` e payload `[23, 01, 91, 01]`.
 
 ## Opcode e ruoli dichiarati
 
@@ -70,7 +70,7 @@ Le richieste usano il payload interno `[0x23, seq, opcode, revisione, ...]`. Le 
 
 | Passo | Richiesta / comportamento | Risposta e verifica |
 |---|---|---|
-| CLIENT_HELLO / GET_HELLO `0x91` | `[23, seq, 91, 01]` | Attende `0x24`, opcode `0x91`, status `01`. Con `seq=1` produce il frame statico sopra. |
+| CLIENT_HELLO / GET_HELLO `0x91` | Envelope field `0x0100`; payload `[23, seq, 91, 01]` | Attende `0x24`, opcode `0x91`, status `01`. Con `seq=1` produce il frame statico sopra. |
 | GET_CLOCK `0x0B` | `[23, seq, 0B, 00]` | `0x24, seq, 0B, status=01, timestamp u32 LE`; eventuale byte flags successivo ignorato. Timestamp Unix in secondi. |
 | SET_CLOCK `0x0A` | `[23, seq, 0A, 01, timestamp u32 LE]` | Attende `0x24`, opcode `0A`, status `01`. |
 | Verifica clock | GET_CLOCK successivo a SET_CLOCK | La macchina accetta il timestamp impostato o quello successivo di un secondo. È una tolleranza implementativa per il cambio di secondo, da confermare su hardware. |
