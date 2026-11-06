@@ -107,6 +107,8 @@ class PuffinHandshakeTest {
         val transport = MockPuffinTransport()
         val handshake = PuffinHandshake(transport, timeoutMillis = 500)
         handshake.start()
+        println("state = ${handshake.state}")
+        println("frames sent = ${transport.writes.joinToString(" | ") { it.first.joinToString(" ") { byte -> "%02X".format(byte) } }}")
         assertEquals(HandshakeState.OffloadStarted, handshake.state)
         assertEquals(
             listOf(PuffinCharacteristic.CMD_FROM_STRAP, PuffinCharacteristic.EVENTS_FROM_STRAP, PuffinCharacteristic.DATA_FROM_STRAP),
