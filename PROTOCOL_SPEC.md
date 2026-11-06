@@ -169,3 +169,28 @@ Questi comportamenti sono requisiti/risultati preliminari riportati dal progetto
 
 - iOS: `UIBackgroundModes` con `bluetooth-central`, `CBCentralManagerOptionRestoreIdentifierKey` e `NSBluetoothAlwaysUsageDescription`. CoreBluetooth non è disponibile nel simulatore.
 - Android: `ForegroundService` con `foregroundServiceType="connectedDevice"` e WorkManager per la riconnessione.
+
+## Known risks (da validare su hardware)
+
+I seguenti fatti di protocollo sono basati su fonti che si contraddicono tra loro. Vanno verificati al primo test con hardware fisico, prima di costruirci sopra logica di business.
+
+### Offset V18
+
+- La spec usa HR @14, rrCount @15, RR @16+, gravity @33-44, quaternion @45-60, stepCounter @57.
+- Fonti pubbliche (`noop`, `OpenStrap`) potrebbero usare offset diversi (shift di 1-2 byte o overlap diversi).
+- Verifica: confrontare HR del frame v18 con HR dell'app ufficiale sullo stesso secondo. Se coincidono entro ±2 bpm, l'offset @14 è corretto.
+
+### Unità RR
+
+- La spec usa **millisecondi** su v18 @16+ e su 0x2A37.
+- Issue `noop#1505` sospetta che v18 possa usare unità 1/1024 s.
+- Verifica: se `rr[0]` è in `[300, 2000]`, sono ms (spec corretta). Se è in `[300k, 2000k]`, sono ticks (spec da correggere).
+
+### Overlap stepCounter @57
+
+- Il campo @57 si sovrappone al quaternione (45-60).
+- Va verificato se `stepCounter` esiste davvero a @57 o se è un artefatto di interpretazione.
+
+### SpO2 @82
+
+- Confermato: `0x00` senza abbonamento. Nessuna azione necessaria.
