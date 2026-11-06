@@ -1,5 +1,33 @@
+# Python
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.mypy_cache/
+
 # Flutter / Dart
 .dart_tool/
+**/.dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
 .packages
@@ -9,10 +37,13 @@ build/
 coverage/
 *.iml
 .idea/
+**/windows/flutter/ephemeral/
 
 # Android / Gradle
 .gradle/
+**/.gradle/
 local.properties
+**/local.properties
 **/GeneratedPluginRegistrant.java
 android/key.properties
 *.jks
@@ -35,17 +66,25 @@ Carthage/
 **/ios/Flutter/ephemeral/
 **/ios/Flutter/.last_build_id
 **/ios/ServiceDefinitions.json
+**/ios/.symlinks/
 
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-env/
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
+# Logs and generated exports; keep their placeholders
+logs/*.log
+logs/*.csv
+logs/*.jsonl
+logs/*.json
+!logs/.gitkeep
+exports/*
+!exports/.gitkeep
 
-# OS
+# SQLite temporary sidecars; keep the existing database
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Editors and operating systems
+.vscode/
+*.swp
+*.swo
 .DS_Store
 Thumbs.db

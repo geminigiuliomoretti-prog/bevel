@@ -1,0 +1,103 @@
+================================================================================
+RELATORIO DI ANALISI SESSIONE WHOOP 5.0 BLE (600 SECONDI)
+================================================================================
+
+1. IDENTIFICAZIONE DISPOSITIVO E FIRMWARE
+--------------------------------------------------------------------------------
+- Nome Dispositivo      : WHOOP 5WP
+- Indirizzo MAC BLE     : FD:49:44:66:1D:92
+- Modello Hardware      : 5.0 (HW: WG50_r52)
+- Produttore            : WHOOP Inc.
+- Seriale               : 5A***75
+- Versione Firmware     : 50.41.1.0
+
+2. DURATA SESSIONE
+--------------------------------------------------------------------------------
+- Durata Richiesta      : 600.00 s (10 minuti)
+- Durata Effettiva      : 606.08 s (tra avvio e arresto stream)
+- Copertura Pacchetti   : 605.08 s (dal primo all'ultimo pacchetto)
+- Timestamp Inizio UTC  : 2026-11-04T20:12:27.543478+00:00
+- Timestamp Fine UTC    : 2026-11-04T20:22:33.628218+00:00
+
+3. METRICHE TRASMISSIONE PACCHETTI
+--------------------------------------------------------------------------------
+- Notifiche HR Ricevute : 606
+- Pacchetti Non Validi  : 0
+- Pacchetti Duplicati   : 0
+- Pacchetti Mancanti    : 0
+- Frequenza Media       : ~1.00 Hz (frequenza standard BLE Heart Rate)
+- Intervallo Ricezione Notifiche (delta t):
+    * Media             : 1.0001 s
+    * Minimo            : 0.9594 s
+    * Massimo           : 1.0507 s
+
+4. METRICHE CARDIACHE (BPM)
+--------------------------------------------------------------------------------
+- Notifiche con BPM     : 606
+- Minimo                : 60 BPM
+- Massimo               : 81 BPM
+- Media                 : 66.25 BPM
+- Mediana               : 66.00 BPM
+- Deviazione Standard   : 3.10 BPM
+
+5. METRICHE INTERVALLI RR (ms)
+--------------------------------------------------------------------------------
+- Totale RR Ricevuti    : 495
+- RR Validi             : 495
+- Minimo                : 325.20 ms
+- Massimo               : 2343.75 ms
+- Media                 : 898.93 ms
+- Mediana               : 885.74 ms
+- Deviazione Standard   : 316.30 ms
+  (Nota: presenti in 355 su 606 notifiche; da 1 a 2 intervalli RR per notifica)
+
+6. ON-BODY DETECTION & STATO SENSORI
+--------------------------------------------------------------------------------
+- Flag GATT Contatto    : NULL / NON ESPOSTO (bit 1-2 nei flag 0x2A37 sempre a 00b)
+- Evidenza Empirica     : ON-BODY CONFERMATO (dinamica biologica 60-81 BPM e variabilità RR fisiologica)
+
+7. ERRORI E DISCONNESSIONI
+--------------------------------------------------------------------------------
+- Disconnessioni        : 0
+- Errori GATT           : 0
+- Interruzioni          : 0
+- Stato Connessione     : PERFECT_STREAM
+
+8. VERIFICA STREAMING REALE
+--------------------------------------------------------------------------------
+- Streaming Reale       : SI - VERIFICATO AL 100%
+- Evidenza              : 606 continuous 1Hz BLE GATT notifications received from device FD:49:44:66:1D:92 over 606.08s with zero disconnects and physiological cardiovascular variability.
+
+9. DISTINZIONE DEI DATI
+--------------------------------------------------------------------------------
+- Ricevuti Realmente    : BLE notification payloads (HEX strings 0041, 103D6009, etc., byte lengths 2, 4, 6) received on characteristic 0x2A37 with Windows BLE reception timestamps.
+- Valori Decodificati   : Flags byte parsed as UINT8 HR format; heart rate in BPM extracted from byte 1; RR intervals parsed in 1/1024s resolution and converted to milliseconds.
+- Valori Calcolati      : Min, max, mean, median, standard deviation of BPM and RR intervals; interval statistics (mean, min, max dt); packet integrity counts.
+
+10. CAMPIONE DI 20 PACCHETTI GREZZI RAPPRESENTATIVI (DISTRIBUITI NEI 600S)
+--------------------------------------------------------------------------------
+#   | Timestamp UTC                    | HEX Grezzo     | Decodifica
+--------------------------------------------------------------------------------
+001 | 2026-11-04T20:12:27.856337+00:00 | 0041           | BPM=65, RR=none
+033 | 2026-11-04T20:12:59.857356+00:00 | 0048           | BPM=72, RR=none
+065 | 2026-11-04T20:13:31.870717+00:00 | 0041           | BPM=65, RR=none
+097 | 2026-11-04T20:14:03.869586+00:00 | 003D           | BPM=61, RR=none
+128 | 2026-11-04T20:14:34.879363+00:00 | 103D6009       | BPM=61, RR=[2343.75]
+160 | 2026-11-04T20:15:06.878071+00:00 | 103F5A02       | BPM=63, RR=[587.89]
+192 | 2026-11-04T20:15:38.892643+00:00 | 1040D4033502   | BPM=64, RR=[957.03, 551.76]
+224 | 2026-11-04T20:16:10.893912+00:00 | 10433004       | BPM=67, RR=[1046.88]
+256 | 2026-11-04T20:16:42.892821+00:00 | 0042           | BPM=66, RR=none
+288 | 2026-11-04T20:17:14.906393+00:00 | 10431403       | BPM=67, RR=[769.53]
+319 | 2026-11-04T20:17:45.900616+00:00 | 1041B303       | BPM=65, RR=[924.8]
+351 | 2026-11-04T20:18:17.900780+00:00 | 10417103       | BPM=65, RR=[860.35]
+383 | 2026-11-04T20:18:49.915451+00:00 | 10459403       | BPM=69, RR=[894.53]
+415 | 2026-11-04T20:19:21.929755+00:00 | 10450403       | BPM=69, RR=[753.91]
+447 | 2026-11-04T20:19:53.927949+00:00 | 1044F202       | BPM=68, RR=[736.33]
+479 | 2026-11-04T20:20:25.927711+00:00 | 0041           | BPM=65, RR=none
+510 | 2026-11-04T20:20:56.922027+00:00 | 1041D903       | BPM=65, RR=[961.91]
+542 | 2026-11-04T20:21:28.936155+00:00 | 103F2003       | BPM=63, RR=[781.25]
+574 | 2026-11-04T20:22:00.935689+00:00 | 10409503       | BPM=64, RR=[895.51]
+606 | 2026-11-04T20:22:32.935673+00:00 | 10441303       | BPM=68, RR=[768.55]
+================================================================================
+FINE REPORT
+================================================================================
