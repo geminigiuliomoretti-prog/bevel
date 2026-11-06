@@ -24,6 +24,9 @@ jobs:
       - name: Run Kotlin module tests
         working-directory: native/android
         run: bash gradlew :beveltry-ble:testDebugUnitTest
+      - name: Compile manual Android instrumentation test (not executed)
+        working-directory: native/android
+        run: bash gradlew :beveltry-ble:assembleDebugAndroidTest
 
   flutter:
     runs-on: ubuntu-latest
