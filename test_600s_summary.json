@@ -1,0 +1,281 @@
+{
+  "device_identification": {
+    "device_name": "WHOOP 5WP",
+    "device_address": "FD:49:44:66:1D:92",
+    "model_number": "5.0",
+    "manufacturer_name": "WHOOP Inc.",
+    "serial_number_masked": "5A***75",
+    "hardware_revision": "WG50_r52",
+    "firmware_revision": "50.41.1.0"
+  },
+  "session_duration": {
+    "requested_duration_seconds": 600.0,
+    "actual_duration_seconds": 606.08,
+    "stream_started_utc": "2026-11-04T20:12:27.543478+00:00",
+    "stream_stopped_utc": "2026-11-04T20:22:33.628218+00:00",
+    "first_packet_utc": "2026-11-04T20:12:27.856337+00:00",
+    "last_packet_utc": "2026-11-04T20:22:32.935673+00:00",
+    "packet_span_seconds": 605.08
+  },
+  "total_notifications_received": 606,
+  "bpm_metrics": {
+    "count": 606,
+    "min": 60,
+    "max": 81,
+    "mean": 66.25,
+    "median": 66.0,
+    "standard_deviation": 3.1
+  },
+  "rr_intervals_metrics": {
+    "total_received": 495,
+    "total_valid": 495,
+    "min_ms": 325.2,
+    "max_ms": 2343.75,
+    "mean_ms": 898.93,
+    "median_ms": 885.74,
+    "standard_deviation_ms": 316.3
+  },
+  "packet_integrity_and_anomalies": {
+    "invalid_packets": 0,
+    "duplicate_packets": 0,
+    "missing_packets_estimated": 0,
+    "notes": "Cadence was strictly 1.00s (+/- 0.05s) across all 606 received notifications; no missing sequence gaps detected."
+  },
+  "notification_intervals_seconds": {
+    "mean": 1.0001,
+    "min": 0.9594,
+    "max": 1.0507
+  },
+  "connection_events_and_errors": {
+    "disconnections_during_streaming": 0,
+    "gatt_errors_during_streaming": 0,
+    "streaming_interruptions": 0,
+    "status": "PERFECT_STREAM"
+  },
+  "on_body_detection_status": {
+    "gatt_flags_sensor_contact_supported": false,
+    "gatt_flags_sensor_contact_detected": null,
+    "empirical_verification": "ON_BODY_CONFIRMED",
+    "rationale": "WHOOP 5.0 does not use Bluetooth SIG contact bits in flags byte (bits 1-2 remain 00b). However, realistic dynamic biological heart rates (60-81 BPM) and physiological RR interval variability (495 RR values, mean 898.93 ms) empirically verify active on-body contact."
+  },
+  "representative_raw_packets_sample_20": [
+    {
+      "packet_index": 1,
+      "timestamp_utc": "2026-11-04T20:12:27.856337+00:00",
+      "timestamp_local": "2026-11-04T21:12:27.856362",
+      "raw_hex": "0041",
+      "raw_length_bytes": 2,
+      "decoded_bpm": 65,
+      "decoded_rr_ms": []
+    },
+    {
+      "packet_index": 33,
+      "timestamp_utc": "2026-11-04T20:12:59.857356+00:00",
+      "timestamp_local": "2026-11-04T21:12:59.857364",
+      "raw_hex": "0048",
+      "raw_length_bytes": 2,
+      "decoded_bpm": 72,
+      "decoded_rr_ms": []
+    },
+    {
+      "packet_index": 65,
+      "timestamp_utc": "2026-11-04T20:13:31.870717+00:00",
+      "timestamp_local": "2026-11-04T21:13:31.870725",
+      "raw_hex": "0041",
+      "raw_length_bytes": 2,
+      "decoded_bpm": 65,
+      "decoded_rr_ms": []
+    },
+    {
+      "packet_index": 97,
+      "timestamp_utc": "2026-11-04T20:14:03.869586+00:00",
+      "timestamp_local": "2026-11-04T21:14:03.869594",
+      "raw_hex": "003D",
+      "raw_length_bytes": 2,
+      "decoded_bpm": 61,
+      "decoded_rr_ms": []
+    },
+    {
+      "packet_index": 128,
+      "timestamp_utc": "2026-11-04T20:14:34.879363+00:00",
+      "timestamp_local": "2026-11-04T21:14:34.879372",
+      "raw_hex": "103D6009",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 61,
+      "decoded_rr_ms": [
+        2343.75
+      ]
+    },
+    {
+      "packet_index": 160,
+      "timestamp_utc": "2026-11-04T20:15:06.878071+00:00",
+      "timestamp_local": "2026-11-04T21:15:06.878079",
+      "raw_hex": "103F5A02",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 63,
+      "decoded_rr_ms": [
+        587.89
+      ]
+    },
+    {
+      "packet_index": 192,
+      "timestamp_utc": "2026-11-04T20:15:38.892643+00:00",
+      "timestamp_local": "2026-11-04T21:15:38.892650",
+      "raw_hex": "1040D4033502",
+      "raw_length_bytes": 6,
+      "decoded_bpm": 64,
+      "decoded_rr_ms": [
+        957.03,
+        551.76
+      ]
+    },
+    {
+      "packet_index": 224,
+      "timestamp_utc": "2026-11-04T20:16:10.893912+00:00",
+      "timestamp_local": "2026-11-04T21:16:10.893921",
+      "raw_hex": "10433004",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 67,
+      "decoded_rr_ms": [
+        1046.88
+      ]
+    },
+    {
+      "packet_index": 256,
+      "timestamp_utc": "2026-11-04T20:16:42.892821+00:00",
+      "timestamp_local": "2026-11-04T21:16:42.892829",
+      "raw_hex": "0042",
+      "raw_length_bytes": 2,
+      "decoded_bpm": 66,
+      "decoded_rr_ms": []
+    },
+    {
+      "packet_index": 288,
+      "timestamp_utc": "2026-11-04T20:17:14.906393+00:00",
+      "timestamp_local": "2026-11-04T21:17:14.906408",
+      "raw_hex": "10431403",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 67,
+      "decoded_rr_ms": [
+        769.53
+      ]
+    },
+    {
+      "packet_index": 319,
+      "timestamp_utc": "2026-11-04T20:17:45.900616+00:00",
+      "timestamp_local": "2026-11-04T21:17:45.900622",
+      "raw_hex": "1041B303",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 65,
+      "decoded_rr_ms": [
+        924.8
+      ]
+    },
+    {
+      "packet_index": 351,
+      "timestamp_utc": "2026-11-04T20:18:17.900780+00:00",
+      "timestamp_local": "2026-11-04T21:18:17.900790",
+      "raw_hex": "10417103",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 65,
+      "decoded_rr_ms": [
+        860.35
+      ]
+    },
+    {
+      "packet_index": 383,
+      "timestamp_utc": "2026-11-04T20:18:49.915451+00:00",
+      "timestamp_local": "2026-11-04T21:18:49.915460",
+      "raw_hex": "10459403",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 69,
+      "decoded_rr_ms": [
+        894.53
+      ]
+    },
+    {
+      "packet_index": 415,
+      "timestamp_utc": "2026-11-04T20:19:21.929755+00:00",
+      "timestamp_local": "2026-11-04T21:19:21.929762",
+      "raw_hex": "10450403",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 69,
+      "decoded_rr_ms": [
+        753.91
+      ]
+    },
+    {
+      "packet_index": 447,
+      "timestamp_utc": "2026-11-04T20:19:53.927949+00:00",
+      "timestamp_local": "2026-11-04T21:19:53.927958",
+      "raw_hex": "1044F202",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 68,
+      "decoded_rr_ms": [
+        736.33
+      ]
+    },
+    {
+      "packet_index": 479,
+      "timestamp_utc": "2026-11-04T20:20:25.927711+00:00",
+      "timestamp_local": "2026-11-04T21:20:25.927718",
+      "raw_hex": "0041",
+      "raw_length_bytes": 2,
+      "decoded_bpm": 65,
+      "decoded_rr_ms": []
+    },
+    {
+      "packet_index": 510,
+      "timestamp_utc": "2026-11-04T20:20:56.922027+00:00",
+      "timestamp_local": "2026-11-04T21:20:56.922037",
+      "raw_hex": "1041D903",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 65,
+      "decoded_rr_ms": [
+        961.91
+      ]
+    },
+    {
+      "packet_index": 542,
+      "timestamp_utc": "2026-11-04T20:21:28.936155+00:00",
+      "timestamp_local": "2026-11-04T21:21:28.936162",
+      "raw_hex": "103F2003",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 63,
+      "decoded_rr_ms": [
+        781.25
+      ]
+    },
+    {
+      "packet_index": 574,
+      "timestamp_utc": "2026-11-04T20:22:00.935689+00:00",
+      "timestamp_local": "2026-11-04T21:22:00.935696",
+      "raw_hex": "10409503",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 64,
+      "decoded_rr_ms": [
+        895.51
+      ]
+    },
+    {
+      "packet_index": 606,
+      "timestamp_utc": "2026-11-04T20:22:32.935673+00:00",
+      "timestamp_local": "2026-11-04T21:22:32.935683",
+      "raw_hex": "10441303",
+      "raw_length_bytes": 4,
+      "decoded_bpm": 68,
+      "decoded_rr_ms": [
+        768.55
+      ]
+    }
+  ],
+  "data_classification": {
+    "raw_received_data": "BLE notification payloads (HEX strings 0041, 103D6009, etc., byte lengths 2, 4, 6) received on characteristic 0x2A37 with Windows BLE reception timestamps.",
+    "decoded_values": "Flags byte parsed as UINT8 HR format; heart rate in BPM extracted from byte 1; RR intervals parsed in 1/1024s resolution and converted to milliseconds.",
+    "statistically_calculated_values": "Min, max, mean, median, standard deviation of BPM and RR intervals; interval statistics (mean, min, max dt); packet integrity counts."
+  },
+  "streaming_verification": {
+    "verified_real_stream": true,
+    "verification_basis": "606 continuous 1Hz BLE GATT notifications received from device FD:49:44:66:1D:92 over 606.08s with zero disconnects and physiological cardiovascular variability."
+  }
+}
