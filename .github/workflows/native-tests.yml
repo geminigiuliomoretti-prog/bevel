@@ -26,7 +26,16 @@ jobs:
         run: bash gradlew :beveltry-ble:testDebugUnitTest
       - name: Compile manual Android instrumentation test (not executed)
         working-directory: native/android
-        run: bash gradlew :beveltry-ble:assembleDebugAndroidTest
+        run: |
+          set -o pipefail
+          bash gradlew :beveltry-ble:assembleDebugAndroidTest --stacktrace 2>&1 | tee "$RUNNER_TEMP/android-test-build.log"
+          result=$?
+          if [ "$result" -ne 0 ]; then
+            tail -n 24 "$RUNNER_TEMP/android-test-build.log" | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+          fi
+          exit "$result"
 
   flutter:
     runs-on: ubuntu-latest
