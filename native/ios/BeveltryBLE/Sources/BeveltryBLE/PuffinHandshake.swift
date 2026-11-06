@@ -205,7 +205,7 @@ public final class PuffinHandshake {
     @discardableResult
     private func sendAndAcknowledge(
         payload: [UInt8], opcode: UInt8, sequence: UInt8, reader: FrameIteratorBox,
-        field: UInt16 = Self.field,
+        field: UInt16 = 0x0001,
         retryOnce: Bool = false, returnsFrame: Bool = false
     ) async throws -> PuffinFrame? {
         let frame = try encode(payload, field: field)
@@ -271,7 +271,7 @@ public final class PuffinHandshake {
         }
     }
 
-    private func encode(_ payload: [UInt8], field: UInt16 = Self.field) throws -> Data {
+    private func encode(_ payload: [UInt8], field: UInt16 = 0x0001) throws -> Data {
         try PuffinFrameCodec.encode(field: field, payload: Data(payload))
     }
 
