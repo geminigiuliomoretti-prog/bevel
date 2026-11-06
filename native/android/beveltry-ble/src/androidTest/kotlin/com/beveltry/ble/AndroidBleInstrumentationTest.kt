@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.channels.receiveAsFlow
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -93,14 +94,10 @@ class AndroidBleInstrumentationTest {
             checkPoint("FRAME-31", states.any { it.contains("Ready") }, "0x31 non arrivato entro 30s; handshake=${handshake.state}")
         }
 
-        val v18 = withTimeout(60_000) {
-            if (metadata != null && isV18(metadata!!)) metadata!! else {
-                while (true) {
-                    val (frame, characteristic) = receivedFrames.receive()
-                    if (characteristic == PuffinCharacteristic.DATA_FROM_STRAP && isV18(frame)) return@withTimeout frame
-                }
-                @Suppress("UNREACHABLE_CODE") null
-            }
+        val v18: PuffinFrame = withTimeout(60_000) {
+            metadata?.takeIf(::isV18) ?: receivedFrames.receiveAsFlow()
+                .first { (frame, characteristic) -> characteristic == PuffinCharacteristic.DATA_FROM_STRAP && isV18(frame) }
+                .first
         }
         val bytes = v18.rawPayload
         val rrCount = bytes.getOrNull(15)?.u8() ?: 0
