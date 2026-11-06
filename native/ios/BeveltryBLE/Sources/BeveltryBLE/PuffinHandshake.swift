@@ -33,18 +33,6 @@ public protocol PuffinHandshakeDelegate: AnyObject {
     func handshake(_ handshake: PuffinHandshake, didFailWith error: PuffinHandshakeError)
 }
 
-private actor PuffinFrameReader {
-    private var iterator: AsyncStream<(PuffinFrame, PuffinCharacteristic)>.Iterator
-
-    init(_ stream: AsyncStream<(PuffinFrame, PuffinCharacteristic)>) {
-        iterator = stream.makeAsyncIterator()
-    }
-
-    func next() async -> (PuffinFrame, PuffinCharacteristic)? {
-        await iterator.next()
-    }
-}
-
 public final class PuffinHandshake {
     public private(set) var state: HandshakeState = .idle
 
@@ -108,7 +96,7 @@ public final class PuffinHandshake {
 
     private func run() async throws {
         do {
-            let reader = PuffinFrameReader(transport.incomingFrames)
+            let reader = FrameIteratorBox(transport.incomingFrames)
             transition(.subscribing)
             try await transport.subscribe(to: .cmdFromStrap)
             try await transport.subscribe(to: .eventsFromStrap)
@@ -198,7 +186,7 @@ public final class PuffinHandshake {
         }
     }
 
-    private func readClock(reader: PuffinFrameReader) async throws -> UInt32 {
+    private func readClock(reader: FrameIteratorBox) async throws -> UInt32 {
         let seq = nextSequence()
         let response = try await sendAndAcknowledge(
             payload: [0x23, seq, 0x0B, 0x00], opcode: 0x0B, sequence: seq,
@@ -216,7 +204,7 @@ public final class PuffinHandshake {
 
     @discardableResult
     private func sendAndAcknowledge(
-        payload: [UInt8], opcode: UInt8, sequence: UInt8, reader: PuffinFrameReader,
+        payload: [UInt8], opcode: UInt8, sequence: UInt8, reader: FrameIteratorBox,
         retryOnce: Bool = false, returnsFrame: Bool = false
     ) async throws -> PuffinFrame? {
         let frame = try encode(payload)
@@ -243,7 +231,7 @@ public final class PuffinHandshake {
     }
 
     private func waitForResponse(
-        opcode: UInt8, sequence: UInt8, reader: PuffinFrameReader
+        opcode: UInt8, sequence: UInt8, reader: FrameIteratorBox
     ) async throws -> PuffinFrame {
         while true {
             let (frame, characteristic) = try await nextIncoming(opcode: opcode, reader: reader)
@@ -257,7 +245,7 @@ public final class PuffinHandshake {
         }
     }
 
-    private func waitForFirstMetadata(reader: PuffinFrameReader) async throws -> PuffinFrame {
+    private func waitForFirstMetadata(reader: FrameIteratorBox) async throws -> PuffinFrame {
         while true {
             let (frame, characteristic) = try await nextIncoming(opcode: 0x31, reader: reader)
             delegate?.handshake(self, didReceiveRawFrame: frame)
@@ -266,7 +254,7 @@ public final class PuffinHandshake {
     }
 
     private func nextIncoming(
-        opcode: UInt8, reader: PuffinFrameReader
+        opcode: UInt8, reader: FrameIteratorBox
     ) async throws -> (PuffinFrame, PuffinCharacteristic) {
         try await withThrowingTaskGroup(of: (PuffinFrame, PuffinCharacteristic)?.self) { group in
             group.addTask { await reader.next() }
