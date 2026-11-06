@@ -9,4 +9,7 @@ dependencies {
 
 kotlin { jvmToolchain(17) }
 
-tasks.test { useJUnit() }
+tasks.test {
+    useJUnit()
+    testLogging { showStandardStreams = true }
+}
