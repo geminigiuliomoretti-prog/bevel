@@ -19,7 +19,7 @@ if not exist "%FLUTTER_BIN%" (
 )
 
 echo [OK] Using Flutter SDK: %FLUTTER_BIN%
-cd /d "%~dp0whoop_app"
+cd /d "%~dp0app"
 
 echo [START] Building and Launching on Windows Desktop...
 call "%FLUTTER_BIN%" run -d windows

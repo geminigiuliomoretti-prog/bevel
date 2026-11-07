@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $BevelRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$WhoopAppDir = Join-Path $BevelRoot "whoop_app"
+$WhoopAppDir = Join-Path $BevelRoot "app"
 $LocalDbPath = Join-Path $BevelRoot "data\whoop_local.db"
 
 Write-Host "====================================================================" -ForegroundColor Cyan
