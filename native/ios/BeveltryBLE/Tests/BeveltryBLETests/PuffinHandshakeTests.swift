@@ -7,11 +7,17 @@ private final class MockPuffinTransport: PuffinTransport {
     private let continuation: AsyncStream<(PuffinFrame, PuffinCharacteristic)>.Continuation
     var writes: [(Data, PuffinCharacteristic)] = []
     var subscriptions: [PuffinCharacteristic] = []
-    var initialClock: UInt32 = 0
+    var initialClock: UInt32 = UInt32(Date().timeIntervalSince1970)
     var clockWillLatch = true
     var failClockSet = false
     var failFlagName: String?
     var withholdHelloAck = false
+    var commandStatus: UInt8 = 1
+    var clockStatus: UInt8 = 1
+    var legacyAckLayout = false
+    var historicalFrames: [(Data, PuffinCharacteristic)] = [
+        (makeHistoricalInner([0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87]), .dataFromStrap)
+    ]
     var flagWrites: [PuffinFrame] = []
     var clockSetFrames: [PuffinFrame] = []
     var ackFrames: [PuffinFrame] = []
@@ -37,7 +43,7 @@ private final class MockPuffinTransport: PuffinTransport {
         let opcode = raw[2]
         switch opcode {
         case 0x91:
-            if !withholdHelloAck { emitAck(sequence: seq, opcode: opcode, status: 1) }
+            if !withholdHelloAck { emitAck(sequence: seq, opcode: opcode, status: commandStatus) }
         case 0x0B:
             clockReads += 1
             let timestamp: UInt32
@@ -48,30 +54,25 @@ private final class MockPuffinTransport: PuffinTransport {
             } else {
                 timestamp = 0
             }
-            var response: [UInt8] = [0x24, seq, opcode, 1]
+            var response: [UInt8] = [0x24, seq, opcode, 0x77, clockStatus]
             appendLE(timestamp, to: &response)
-            response.append(0) // flags opzionale
             emit(response, on: .cmdFromStrap)
         case 0x0A:
             clockSetFrames.append(frame)
             latchedClock = readU32(raw, 4)
-            emitAck(sequence: seq, opcode: opcode, status: failClockSet ? 2 : 1)
+            emitAck(sequence: seq, opcode: opcode, status: failClockSet ? 2 : commandStatus)
         case 0x73:
             emitAck(sequence: seq, opcode: opcode, status: 1)
         case 0x78:
             flagWrites.append(frame)
             let nameBytes = raw[4..<36].prefix { $0 != 0 }
             let name = String(bytes: nameBytes, encoding: .ascii)
-            let status: UInt8 = name == failFlagName ? 2 : 1
+            let status: UInt8 = name == failFlagName ? 2 : commandStatus
             emitAck(sequence: seq, opcode: opcode, status: status)
         case 0x22:
-            emit([0x24, seq, opcode, 1, 0xAA], on: .cmdFromStrap)
+            emit(legacyAckLayout ? [0x24, seq, opcode, commandStatus] : [0x24, seq, opcode, 0x77, commandStatus], on: .cmdFromStrap)
         case 0x16:
-            var metadata = (0..<24).map(UInt8.init)
-            metadata[0] = 0x31
-            let cursor: [UInt8] = [0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87]
-            for index in 0..<8 { metadata[13 + index] = cursor[index] }
-            emit(metadata, on: .dataFromStrap)
+            historicalFrames.forEach { emit(Array($0.0), on: $0.1) }
         case 0x17:
             ackFrames.append(frame)
         default:
@@ -80,7 +81,7 @@ private final class MockPuffinTransport: PuffinTransport {
     }
 
     private func emitAck(sequence: UInt8, opcode: UInt8, status: UInt8) {
-        emit([0x24, sequence, opcode, status], on: .cmdFromStrap)
+        emit(legacyAckLayout ? [0x24, sequence, opcode, status] : [0x24, sequence, opcode, 0x77, status], on: .cmdFromStrap)
     }
 
     private func emit(_ payload: [UInt8], on characteristic: PuffinCharacteristic) {
@@ -102,6 +103,21 @@ private final class MockPuffinTransport: PuffinTransport {
     }
 }
 
+private func makeHistoricalInner(_ cursor: [UInt8]) -> Data {
+    var payload = [UInt8](repeating: 0, count: 40)
+    payload[0] = 0x31
+    payload.replaceSubrange(13..<21, with: cursor)
+    return Data(payload)
+}
+
+private func makeV18Inner(_ timestamp: UInt32) -> Data {
+    var payload = [UInt8](repeating: 0, count: 112)
+    payload[0] = 0x2F
+    payload[1] = 0x12
+    for index in 0..<4 { payload[7 + index] = UInt8(truncatingIfNeeded: timestamp >> (8 * index)) }
+    return Data(payload)
+}
+
 private final class MockHandshakeDelegate: PuffinHandshakeDelegate {
     var states: [HandshakeState] = []
     var received: [PuffinFrame] = []
@@ -113,20 +129,22 @@ private final class MockHandshakeDelegate: PuffinHandshakeDelegate {
 }
 
 final class PuffinHandshakeTests: XCTestCase {
-    func testHappyPathRunsThroughFirstHistoricalCursorAck() async throws {
+    func testHappyPathCompletesBootstrapBeforeHistoricalStreaming() async throws {
         let transport = MockPuffinTransport()
         let handshake = PuffinHandshake(transport: transport, delegate: nil, timeout: 0.2)
         try await handshake.start()
 
-        XCTAssertEqual(handshake.state, .offloadStarted)
+        XCTAssertEqual(handshake.state, .ready)
         XCTAssertEqual(transport.subscriptions, [.cmdFromStrap, .eventsFromStrap, .dataFromStrap])
         XCTAssertEqual(transport.flagWrites.count, 32)
-        XCTAssertEqual(transport.ackFrames.count, 1)
+        XCTAssertEqual(transport.ackFrames.count, 0)
         XCTAssertEqual(transport.writes.first?.0,
                        Data([0xAA, 0x01, 0x08, 0x00, 0x00, 0x01, 0xE6, 0x71,
                              0x23, 0x01, 0x91, 0x01, 0x36, 0x3E, 0x5C, 0x8D]))
-        XCTAssertEqual(Array(transport.ackFrames[0].rawPayload[4..<12]),
-                       [0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87])
+        for try await _ in handshake.offloadHistorical(timeout: 0.05) { }
+        XCTAssertEqual(handshake.state, .ready)
+        XCTAssertEqual(transport.ackFrames.count, 1)
+        XCTAssertEqual(Array(transport.ackFrames[0].rawPayload[4..<12]), [0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87])
         let expectedFlags: [(String, UInt8)] = [
             ("enable_r22_packets", 2), ("enable_r22_v2_packets", 2),
             ("enable_r22_v3_packets", 2), ("enable_r22_v4_packets", 1),
@@ -171,13 +189,38 @@ final class PuffinHandshakeTests: XCTestCase {
         XCTAssertEqual(wireFrame, expectedFrame)
     }
 
-    func testClockAtEpochIsSetAndVerified() async throws {
+    func testStatusZeroAndClockResponseAtByteFiveAreAccepted() async throws {
+        let transport = MockPuffinTransport()
+        transport.initialClock = 1_793_679_344
+        transport.commandStatus = 0
+        transport.clockStatus = 0
+        let handshake = PuffinHandshake(transport: transport, delegate: nil, timeout: 0.2)
+        try await handshake.start()
+        XCTAssertEqual(handshake.state, .ready)
+        XCTAssertEqual(transport.clockSetFrames.count, 1)
+    }
+
+    func testFourByteCommandResponseUsesByteThreeForStatus() async throws {
+        let transport = MockPuffinTransport()
+        transport.commandStatus = 0
+        transport.clockStatus = 0
+        transport.legacyAckLayout = true
+        let handshake = PuffinHandshake(transport: transport, delegate: nil, timeout: 0.2)
+        try await handshake.start()
+        XCTAssertEqual(handshake.state, .ready)
+    }
+
+    func testZeroClockTimestampIsNotLatched() async {
         let transport = MockPuffinTransport()
         transport.initialClock = 0
         let handshake = PuffinHandshake(transport: transport, delegate: nil, timeout: 0.2)
-        try await handshake.start()
-        XCTAssertEqual(handshake.state, .offloadStarted)
-        XCTAssertEqual(transport.clockSetFrames.count, 1)
+        do {
+            try await handshake.start()
+            XCTFail("Era atteso clockNotLatched")
+        } catch let error as PuffinHandshakeError {
+            XCTAssertEqual(error, .clockNotLatched)
+        } catch { XCTFail("Errore inatteso: \(error)") }
+        XCTAssertEqual(transport.clockSetFrames.count, 0)
     }
 
     func testGetHelloTimeoutFailsHandshake() async {
@@ -240,16 +283,41 @@ final class PuffinHandshakeTests: XCTestCase {
         }
     }
 
-    func testFirstMetadataCursorIsSentInHistoricalAck() async throws {
+    func testHistoricalStreamAcknowledgesThreeDistinctCursors() async throws {
         let transport = MockPuffinTransport()
+        let cursors = (0..<3).map { index in (0..<8).map { UInt8(index * 10 + $0) } }
+        transport.historicalFrames = cursors.map { (makeHistoricalInner($0), .dataFromStrap) }
         let handshake = PuffinHandshake(transport: transport, delegate: nil, timeout: 0.2)
         try await handshake.start()
-        let ack = try XCTUnwrap(transport.ackFrames.first)
-        XCTAssertEqual(Array(ack.rawPayload[0..<4]), [0x23, ack.rawPayload[1], 0x17, 0x01])
-        XCTAssertEqual(Array(ack.rawPayload[4..<12]), [0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87])
-        let ackWire = try XCTUnwrap(transport.writes.last?.0)
-        XCTAssertEqual(ackWire.count, 24)
-        XCTAssertEqual(UInt16(ackWire[2]) | (UInt16(ackWire[3]) << 8), 16)
+        for try await _ in handshake.offloadHistorical(timeout: 0.05) { }
+        XCTAssertEqual(transport.ackFrames.count, 3)
+        XCTAssertEqual(transport.ackFrames.map { Array($0.rawPayload[4..<12]) }, cursors)
+        XCTAssertTrue(transport.ackFrames.allSatisfy { $0.rawPayload[2] == 0x17 && $0.rawPayload[3] == 0x01 })
+    }
+
+    func testRepeatedCursorIsAcknowledgedOnce() async throws {
+        let cursor: [UInt8] = [1, 2, 3, 4, 5, 6, 7, 8]
+        let transport = MockPuffinTransport()
+        transport.historicalFrames = [makeHistoricalInner(cursor), makeHistoricalInner(cursor)].map { ($0, .dataFromStrap) }
+        let handshake = PuffinHandshake(transport: transport, delegate: nil, timeout: 0.2)
+        try await handshake.start()
+        for try await _ in handshake.offloadHistorical(timeout: 0.05) { }
+        XCTAssertEqual(transport.ackFrames.count, 1)
+    }
+
+    func testHistoricalStreamDeliversFiveRecordsWithoutAcknowledgingThem() async throws {
+        let cursor: [UInt8] = [8, 7, 6, 5, 4, 3, 2, 1]
+        let timestamp: UInt32 = 1_793_679_344
+        let transport = MockPuffinTransport()
+        transport.historicalFrames = (0..<5).map { _ in (makeV18Inner(timestamp), .dataFromStrap) }
+            + [(makeHistoricalInner(cursor), .dataFromStrap)]
+        var delivered: [PuffinFrame] = []
+        let handshake = PuffinHandshake(transport: transport, delegate: nil, timeout: 0.2)
+        try await handshake.start()
+        for try await _ in handshake.offloadHistorical(timeout: 0.05, onRecord: { delivered.append($0) }) { }
+        XCTAssertEqual(delivered.count, 5)
+        XCTAssertEqual(transport.ackFrames.count, 1)
+        XCTAssertEqual(transport.ackFrames[0].rawPayload[2], 0x17)
     }
 
     func testFlagFrameHasExpectedWireSizeAndLength() async throws {

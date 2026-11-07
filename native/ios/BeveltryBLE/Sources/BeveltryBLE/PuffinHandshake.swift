@@ -27,6 +27,22 @@ public enum HandshakeState: Equatable {
     case failed(PuffinHandshakeError)
 }
 
+public struct OffloadProgress: Equatable, Sendable {
+    public let recordsReceived: Int
+    public let cursorsAcknowledged: Int
+    public let lastSeenTimestamp: Date?
+    public let completed: Bool
+    public let timedOut: Bool
+
+    public init(recordsReceived: Int, cursorsAcknowledged: Int, lastSeenTimestamp: Date?, completed: Bool, timedOut: Bool) {
+        self.recordsReceived = recordsReceived
+        self.cursorsAcknowledged = cursorsAcknowledged
+        self.lastSeenTimestamp = lastSeenTimestamp
+        self.completed = completed
+        self.timedOut = timedOut
+    }
+}
+
 public protocol PuffinHandshakeDelegate: AnyObject {
     func handshake(_ handshake: PuffinHandshake, didChangeState state: HandshakeState)
     func handshake(_ handshake: PuffinHandshake, didReceiveRawFrame frame: PuffinFrame)
@@ -41,6 +57,8 @@ public final class PuffinHandshake {
     private let timeout: TimeInterval
     private var sequence: UInt8 = 1
     private var operation: Task<Void, Error>?
+    private var offloadOperation: Task<Void, Never>?
+    private var activeReader: FrameIteratorBox?
     private var didReportFailure = false
 
     private static let field: UInt16 = 0x0001
@@ -92,11 +110,13 @@ public final class PuffinHandshake {
 
     public func cancel() {
         operation?.cancel()
+        offloadOperation?.cancel()
     }
 
     private func run() async throws {
         do {
             let reader = FrameIteratorBox(transport.incomingFrames)
+            activeReader = reader
             transition(.subscribing)
             try await transport.subscribe(to: .cmdFromStrap)
             try await transport.subscribe(to: .eventsFromStrap)
@@ -160,19 +180,6 @@ public final class PuffinHandshake {
             _ = try await waitForResponse(opcode: 0x22, sequence: rangeSequence, reader: reader)
 
             transition(.ready)
-            transition(.startingHistorical)
-            let historicalSequence = nextSequence()
-            try await transport.write(try encode([0x23, historicalSequence, 0x16, 0x00]), to: .cmdToStrap)
-            let metadata = try await waitForFirstMetadata(reader: reader)
-            guard metadata.rawPayload.count >= 21 else {
-                throw PuffinHandshakeError.unexpectedResponse(opcode: 0x31)
-            }
-
-            let ackSequence = nextSequence()
-            var ackPayload: [UInt8] = [0x23, ackSequence, 0x17, 0x01]
-            ackPayload.append(contentsOf: metadata.rawPayload[13..<21])
-            try await transport.write(try encode(ackPayload), to: .cmdToStrap)
-            transition(.offloadStarted)
         } catch let error as PuffinHandshakeError {
             fail(error)
             throw error
@@ -186,20 +193,129 @@ public final class PuffinHandshake {
         }
     }
 
+    /// Avvia lo streaming storico e invia ACK solo per cursori consecutivi nuovi.
+    public func offloadHistorical(
+        endTimestamp: Date? = nil,
+        timeout: TimeInterval = 60,
+        onRecord: @escaping (PuffinFrame) -> Void = { _ in }
+    ) -> AsyncThrowingStream<OffloadProgress, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    try await self.runOffload(endTimestamp: endTimestamp, timeout: max(0.001, timeout), onRecord: onRecord, continuation: continuation)
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            offloadOperation = task
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
+    }
+
+    private func runOffload(
+        endTimestamp: Date?, timeout: TimeInterval, onRecord: @escaping (PuffinFrame) -> Void,
+        continuation: AsyncThrowingStream<OffloadProgress, Error>.Continuation
+    ) async throws {
+        guard state == .ready || state == .offloadStarted else {
+            throw PuffinHandshakeError.unexpectedResponse(opcode: 0x16)
+        }
+        let reader = activeReader ?? FrameIteratorBox(transport.incomingFrames)
+        activeReader = reader
+        transition(.startingHistorical)
+        let sequence = nextSequence()
+        try await transport.write(try encode([0x23, sequence, 0x16, 0x00]), to: .cmdToStrap)
+        transition(.offloadStarted)
+
+        let deadline = Date().addingTimeInterval(timeout)
+        var recordsReceived = 0
+        var cursorsAcknowledged = 0
+        var lastSeenTimestamp: Date?
+        var lastCursor: Data?
+        var completed = false
+        var timedOut = false
+
+        while !Task.isCancelled {
+            let remaining = deadline.timeIntervalSinceNow
+            if remaining <= 0 { timedOut = true; break }
+            let incoming: (PuffinFrame, PuffinCharacteristic)
+            do {
+                incoming = try await nextIncoming(opcode: 0x16, reader: reader, timeout: remaining)
+            } catch PuffinHandshakeError.ackTimeout(_) {
+                timedOut = true
+                break
+            }
+            let (frame, characteristic) = incoming
+            let bytes = Array(frame.rawPayload)
+            switch bytes.first ?? 0 {
+            case 0x2F:
+                onRecord(frame)
+                recordsReceived += 1
+                if bytes.count >= 11 {
+                    let seconds = readUInt32LE(bytes, 7)
+                    lastSeenTimestamp = Date(timeIntervalSince1970: TimeInterval(seconds))
+                }
+                continuation.yield(OffloadProgress(recordsReceived: recordsReceived, cursorsAcknowledged: cursorsAcknowledged, lastSeenTimestamp: lastSeenTimestamp, completed: false, timedOut: false))
+                if let endTimestamp, let lastSeenTimestamp, lastSeenTimestamp >= endTimestamp {
+                    completed = true
+                    break
+                }
+            case 0x31 where characteristic == .dataFromStrap && bytes.count >= 21:
+                let cursor = Data(bytes[13..<21])
+                if cursor != lastCursor {
+                    var payload: [UInt8] = [0x23, nextSequence(), 0x17, 0x01]
+                    payload.append(contentsOf: cursor)
+                    try await writeWithTimeout(try encode(payload), timeout: 0.8)
+                    lastCursor = cursor
+                    cursorsAcknowledged += 1
+                    continuation.yield(OffloadProgress(recordsReceived: recordsReceived, cursorsAcknowledged: cursorsAcknowledged, lastSeenTimestamp: lastSeenTimestamp, completed: false, timedOut: false))
+                }
+            case 0x24:
+                delegate?.handshake(self, didReceiveRawFrame: frame)
+            default:
+                break
+            }
+            if completed { break }
+        }
+        transition(.ready)
+        continuation.yield(OffloadProgress(recordsReceived: recordsReceived, cursorsAcknowledged: cursorsAcknowledged, lastSeenTimestamp: lastSeenTimestamp, completed: completed, timedOut: timedOut))
+    }
+
+    public func stop() {
+        offloadOperation?.cancel()
+    }
+
+    private func writeWithTimeout(_ frame: Data, timeout: TimeInterval) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { try await self.transport.write(frame, to: .cmdToStrap) }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                throw PuffinHandshakeError.ackTimeout(opcode: 0x17)
+            }
+            _ = try await group.next()
+            group.cancelAll()
+        }
+    }
+
+    private func readUInt32LE(_ bytes: [UInt8], _ offset: Int) -> UInt32 {
+        UInt32(bytes[offset]) | (UInt32(bytes[offset + 1]) << 8) | (UInt32(bytes[offset + 2]) << 16) | (UInt32(bytes[offset + 3]) << 24)
+    }
+
     private func readClock(reader: FrameIteratorBox) async throws -> UInt32 {
         let seq = nextSequence()
         let response = try await sendAndAcknowledge(
             payload: [0x23, seq, 0x0B, 0x00], opcode: 0x0B, sequence: seq,
             reader: reader, returnsFrame: true
         )
-        guard let response, response.rawPayload.count >= 8 else {
+        guard let response, response.rawPayload.count >= 9 else {
             throw PuffinHandshakeError.unexpectedResponse(opcode: 0x0B)
         }
         let bytes = response.rawPayload
-        guard bytes[3] == 0x01 else {
-            throw PuffinHandshakeError.ackStatusFailure(opcode: 0x0B, status: bytes[3])
-        }
-        return UInt32(bytes[4]) | (UInt32(bytes[5]) << 8) | (UInt32(bytes[6]) << 16) | (UInt32(bytes[7]) << 24)
+        let timestamp = readUInt32LE(Array(bytes), 5)
+        guard timestamp > 1_700_000_000 else { throw PuffinHandshakeError.clockNotLatched }
+        return timestamp
     }
 
     @discardableResult
@@ -215,8 +331,8 @@ public final class PuffinHandshake {
             try await transport.write(frame, to: .cmdToStrap)
             do {
                 let response = try await waitForResponse(opcode: opcode, sequence: sequence, reader: reader)
-                let status = response.rawPayload.count > 3 ? response.rawPayload[3] : 0
-                guard status == 0x01 else {
+                let status = responseStatus(response.rawPayload)
+                guard status == 0x00 || status == 0x01 else {
                     lastError = .ackStatusFailure(opcode: opcode, status: status)
                     if retryOnce && attempt == 0 { continue }
                     throw lastError
@@ -238,29 +354,26 @@ public final class PuffinHandshake {
             let (frame, characteristic) = try await nextIncoming(opcode: opcode, reader: reader)
             delegate?.handshake(self, didReceiveRawFrame: frame)
             let raw = frame.rawPayload
-            guard characteristic == .cmdFromStrap, raw.count >= 3, raw[0] == 0x24, raw[1] == sequence else {
+            guard characteristic == .cmdFromStrap, raw.count >= 4, raw[0] == 0x24, raw[1] == sequence else {
                 continue
             }
             guard raw[2] == opcode else { throw PuffinHandshakeError.unexpectedResponse(opcode: raw[2]) }
+            let status = responseStatus(frame.rawPayload)
+            guard status == 0x00 || status == 0x01 else {
+                throw PuffinHandshakeError.ackStatusFailure(opcode: opcode, status: status)
+            }
             return frame
         }
     }
 
-    private func waitForFirstMetadata(reader: FrameIteratorBox) async throws -> PuffinFrame {
-        while true {
-            let (frame, characteristic) = try await nextIncoming(opcode: 0x31, reader: reader)
-            delegate?.handshake(self, didReceiveRawFrame: frame)
-            if characteristic == .dataFromStrap, frame.rawPayload.first == 0x31 { return frame }
-        }
-    }
-
     private func nextIncoming(
-        opcode: UInt8, reader: FrameIteratorBox
+        opcode: UInt8, reader: FrameIteratorBox, timeout: TimeInterval? = nil
     ) async throws -> (PuffinFrame, PuffinCharacteristic) {
+        let wait = timeout ?? self.timeout
         try await withThrowingTaskGroup(of: (PuffinFrame, PuffinCharacteristic)?.self) { group in
             group.addTask { await reader.next() }
             group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(self.timeout * 1_000_000_000))
+                try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
                 throw PuffinHandshakeError.ackTimeout(opcode: opcode)
             }
             defer { group.cancelAll() }
@@ -269,6 +382,10 @@ public final class PuffinHandshake {
             }
             return incoming
         }
+    }
+
+    private func responseStatus(_ bytes: Data) -> UInt8 {
+        bytes.count >= 5 ? bytes[4] : (bytes.count >= 4 ? bytes[3] : 0)
     }
 
     private func encode(_ payload: [UInt8], field: UInt16 = 0x0001) throws -> Data {
