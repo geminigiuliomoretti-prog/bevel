@@ -5,130 +5,136 @@ import 'package:beveltry/src/records/v18_record.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('decodifica i campi V18 confermati e mantiene il buffer intatto', () {
-    final payload = _v18Payload();
-    final original = Uint8List.fromList(payload);
+  test('decodifica l’inner payload della cattura firmware reale', () {
+    final payload = _realCaptureInner();
 
     final record = V18Record.decode(payload);
 
-    expect(record.seq, 0x1234);
-    expect(
-      record.timestamp,
-      DateTime.utc(1970).add(const Duration(seconds: 0x04030201)),
-    );
-    expect(record.hrPrimary, 72);
-    expect(record.hrSecondary, 68);
-    expect(record.rrCount, 2);
-    expect(record.rrIntervalsMs, [850, 860]);
-    expect(record.gravityX, closeTo(0.1, 1e-6));
-    expect(record.gravityY, closeTo(-0.2, 1e-6));
-    expect(record.gravityZ, closeTo(0.9, 1e-6));
-    expect(record.quaternionW, 1.0);
-    expect(record.quaternionX, 0.0);
-    expect(record.quaternionY, 0.0);
-    expect(record.quaternionZ, 0.0);
-    expect(record.spo2Candidate, 0);
-    expect(record.opticalBaseline, 45000);
-    expect(record.opticalAmpA, 50);
-    expect(record.opticalAmpB, 48);
-    expect(payload, original);
+    expect(payload, hasLength(112));
+    expect(record.seq, 9856);
+    expect(record.timestamp, DateTime.utc(2026, 11, 3, 4, 15, 44));
+    expect(record.hrPrimary, 51);
+    expect(record.rrCount, 1);
+    expect(record.rrIntervalsMs, [1145]);
   });
 
-  test('HR zero indica off-wrist e rrCount zero produce lista vuota', () {
-    final payload = _v18Payload()..[14] = 0;
-    ByteData.sublistView(payload).setUint8(15, 0);
+  test('un inner payload valido da 112 byte legge tutti i campi', () {
+    final record = V18Record.decode(_innerPayload());
 
-    final record = V18Record.decode(payload);
-
+    expect(record.seq, 0);
     expect(record.hrPrimary, 0);
-    expect(record.rrCount, 0);
+    expect(record.hrSecondary, 0);
     expect(record.rrIntervalsMs, isEmpty);
+    expect(record.gravityX, 0);
+    expect(record.gravityY, 0);
+    expect(record.gravityZ, 0);
+    expect(record.accelMagG, 0);
+    expect(record.stepCounter, 0);
+    expect(record.skinTempRaw, isNull);
+    expect(record.activityFlag, 0);
+    expect(record.spo2Candidate, 0);
+    expect(record.sleepState, 0);
+    expect(record.opticalBaselineCh1, 0);
+    expect(record.opticalBaselineCh2, 0);
+    expect(record.opticalBaseline, 0);
+    expect(record.isOnWrist, isFalse);
   });
 
-  test('legge tutti e quattro gli intervalli R-R in millisecondi', () {
-    final payload = _v18Payload();
-    final data = ByteData.sublistView(payload);
-    data.setUint8(15, 4);
-    for (var i = 0; i < 4; i++) {
-      data.setUint16(16 + i * 2, 800 + i * 10, Endian.little);
-    }
-
-    expect(V18Record.decode(payload).rrIntervalsMs, [800, 810, 820, 830]);
-  });
-
-  test('i campi sperimentali vengono letti senza interrompere il decode', () {
-    final payload = _v18Payload();
-    final data = ByteData.sublistView(payload);
-    data.setUint16(57, 1234, Endian.little);
-    data.setInt16(60, -15, Endian.little);
-    data.setUint8(62, 2);
-    data.setFloat32(113, -5.125, Endian.little);
+  test('accetta 108 byte e legge il secondo optical baseline disponibile', () {
+    final payload = _innerPayload(length: 108);
+    ByteData.sublistView(payload).setUint16(106, 45678, Endian.little);
 
     final record = V18Record.decode(payload);
 
-    expect(record.stepCounter, 1234);
-    expect(record.skinTempRaw, -15);
-    expect(record.sleepState, 2);
-    expect(record.unknownF32, -5.125);
+    expect(record.opticalBaselineCh2, 45678);
+    expect(record.opticalBaseline, 45678);
   });
 
-  test('un float sperimentale non finito diventa null', () {
-    final payload = _v18Payload();
-    ByteData.sublistView(payload).setFloat32(113, double.nan, Endian.little);
-
-    expect(V18Record.decode(payload).unknownF32, isNull);
+  test('rifiuta un inner payload da 107 byte e un buffer da 124 byte', () {
+    expect(
+      () => V18Record.decode(_innerPayload(length: 107)),
+      throwsA(isA<RecordDecodeException>()),
+    );
+    expect(
+      () => V18Record.decode(_innerPayload(length: 124)),
+      throwsA(isA<RecordDecodeException>()),
+    );
   });
 
-  test('rifiuta type, version, rrCount e payload non validi', () {
-    final wrongType = _v18Payload()..[0] = 0x28;
-    final wrongVersion = _v18Payload()..[1] = 0x1A;
-    final tooManyIntervals = _v18Payload()..[15] = 5;
-    final short = Uint8List.fromList(_v18Payload().take(123).toList());
+  test('rifiuta type e version errati', () {
+    final wrongType = _innerPayload()..[0] = 0x28;
+    final wrongVersion = _innerPayload()..[1] = 0x1A;
 
-    expect(
-      () => V18Record.decode(wrongType),
-      throwsA(isA<RecordDecodeException>()),
-    );
-    expect(
-      () => V18Record.decode(wrongVersion),
-      throwsA(isA<RecordDecodeException>()),
-    );
-    expect(
-      () => V18Record.decode(tooManyIntervals),
-      throwsA(isA<RecordDecodeException>()),
-    );
-    expect(
-      () => V18Record.decode(short),
-      throwsA(isA<RecordDecodeException>()),
-    );
+    expect(() => V18Record.decode(wrongType), throwsA(isA<RecordDecodeException>()));
+    expect(() => V18Record.decode(wrongVersion), throwsA(isA<RecordDecodeException>()));
+  });
+
+  test('usa il fallback @63 quando la temperatura @61 non è plausibile', () {
+    final payload = _innerPayload();
+    final data = ByteData.sublistView(payload);
+    data.setInt16(61, 100, Endian.little);
+    data.setInt16(63, 320, Endian.little);
+
+    final record = V18Record.decode(payload);
+
+    expect(record.skinTempRaw, 320);
+    expect(record.skinTempCelsius, 32.0);
+  });
+
+  test('opticalBaseline è il massimo dei due canali', () {
+    final payload = _innerPayload();
+    final data = ByteData.sublistView(payload);
+    data.setUint16(98, 40000, Endian.little);
+    data.setUint16(106, 50000, Endian.little);
+
+    final record = V18Record.decode(payload);
+
+    expect(record.opticalBaselineCh1, 40000);
+    expect(record.opticalBaselineCh2, 50000);
+    expect(record.opticalBaseline, 50000);
+  });
+
+  test('isOnWrist segue HR primaria o optical baseline', () {
+    final offWrist = _innerPayload();
+    final onWristByHeartRate = _innerPayload()..[14] = 1;
+    final onWristByOptical = _innerPayload();
+    ByteData.sublistView(onWristByOptical).setUint16(98, 30001, Endian.little);
+
+    expect(V18Record.decode(offWrist).isOnWrist, isFalse);
+    expect(V18Record.decode(onWristByHeartRate).isOnWrist, isTrue);
+    expect(V18Record.decode(onWristByOptical).isOnWrist, isTrue);
+  });
+
+  test('calcola gravità e mantiene gli RR in millisecondi senza conversione', () {
+    final payload = _innerPayload();
+    final data = ByteData.sublistView(payload);
+    payload[15] = 2;
+    data.setUint16(16, 850, Endian.little);
+    data.setUint16(18, 860, Endian.little);
+    data.setFloat32(37, 0.0, Endian.little);
+    data.setFloat32(41, 0.0, Endian.little);
+    data.setFloat32(45, 1.0, Endian.little);
+
+    final record = V18Record.decode(payload);
+
+    expect(record.rrIntervalsMs, [850, 860]);
+    expect(record.accelMagG, closeTo(1.0, 1e-6));
   });
 }
 
-Uint8List _v18Payload() {
-  final payload = Uint8List.fromList(List<int>.filled(124, 0));
-  final data = ByteData.sublistView(payload);
+Uint8List _innerPayload({int length = 112}) {
+  final payload = Uint8List(length);
   payload[0] = 0x2F;
   payload[1] = 0x12;
-  data.setUint16(2, 0x1234, Endian.little);
-  data.setUint32(7, 0x04030201, Endian.little);
-  payload[14] = 72;
-  payload[15] = 2;
-  data.setUint16(16, 850, Endian.little);
-  data.setUint16(18, 860, Endian.little);
-  payload[29] = 68;
-  data.setFloat32(33, 0.1, Endian.little);
-  data.setFloat32(37, -0.2, Endian.little);
-  data.setFloat32(41, 0.9, Endian.little);
-  data.setFloat32(45, 1.0, Endian.little);
-  data.setFloat32(49, 0.0, Endian.little);
-  data.setFloat32(53, 0.0, Endian.little);
-  data.setFloat32(57, 0.0, Endian.little);
-  payload[62] = 2;
-  payload[82] = 0;
-  payload[104] = 1;
-  data.setUint16(106, 45000, Endian.little);
-  payload[108] = 50;
-  payload[109] = 48;
-  data.setFloat32(113, -3.25, Endian.little);
+  return payload;
+}
+
+Uint8List _realCaptureInner() {
+  final payload = _innerPayload();
+  const capturedPrefix = <int>[
+    0x2F, 0x12, 0x80, 0x26, 0x31, 0x14, 0x02, 0xF0, 0x5F,
+    0xE9, 0x6A, 0xEB, 0x11, 0x00, 0x33, 0x01, 0x79, 0x04,
+  ];
+  payload.setRange(0, capturedPrefix.length, capturedPrefix);
   return payload;
 }

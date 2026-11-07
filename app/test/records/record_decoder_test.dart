@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('dispatcha i tre type/version supportati', () {
-    expect(RecordDecoder.decode(_payload(0x2F, 0x12, 124)), isA<V18Record>());
+    expect(RecordDecoder.decode(_payload(0x2F, 0x12, 112)), isA<V18Record>());
     expect(RecordDecoder.decode(_payload(0x2F, 0x1A, 88)), isA<V26Record>());
     expect(RecordDecoder.decode(_payload(0x28, 0x02, 12)), isA<Live28Record>());
   });
@@ -26,7 +26,7 @@ void main() {
         throwsA(isA<RecordDecodeException>()),
       );
       expect(
-        () => RecordDecoder.decode(_payload(0x2F, 0x13, 124)),
+        () => RecordDecoder.decode(_payload(0x2F, 0x13, 112)),
         throwsA(isA<RecordDecodeException>()),
       );
     },
