@@ -16,5 +16,3 @@ interface PuffinTransport {
     fun incomingFrames(): Flow<Pair<PuffinFrame, PuffinCharacteristic>>
 }
 
-/** Segnala che il trasporto conferma autonomamente ogni frame storico 0x31. */
-interface PuffinAutoAcknowledgingTransport

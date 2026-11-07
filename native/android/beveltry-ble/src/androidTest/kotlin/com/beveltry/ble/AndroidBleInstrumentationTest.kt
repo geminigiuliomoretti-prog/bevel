@@ -73,7 +73,14 @@ class AndroidBleInstrumentationTest {
         log("SUBSCRIBE", "MEMFAULT completata; handshake sottoscriverà CMD/EVENTS/DATA")
         // Il primo invio su fd4b0002 avvia il pairing OS se GATT richiede cifratura.
         val handshake = PuffinHandshake(transport, delegate, timeoutMillis = 3_000)
-        val handshakeTask = async { runCatching { handshake.start() } }
+        val bootstrapResult = async { runCatching { handshake.start() } }.await()
+        bootstrapResult.getOrThrow()
+        assertEquals(HandshakeState.Ready, handshake.state)
+        val offloadTask = launch {
+            handshake.offloadHistorical(timeoutMillis = 90_000).collect { progress ->
+                log("OFFLOAD", "records=${progress.recordsReceived} ACK=${progress.cursorsAcknowledged} last=${progress.lastSeenTimestamp} timedOut=${progress.timedOut}")
+            }
+        }
         var metadata: PuffinFrame? = null
         try {
             metadata = withTimeout(30_000) {
@@ -143,8 +150,8 @@ class AndroidBleInstrumentationTest {
         val p5 = !haveRr || allRr.isNotEmpty() && allRr.all { it in 300..2000 }
         checkPoint("P5-2A37", p5, "RR=$allRr unit=ms if in 300..2000")
 
-        handshake.cancel()
-        handshakeTask.cancelAndJoin()
+        handshake.stop()
+        offloadTask.cancelAndJoin()
         framesCollector.cancelAndJoin()
         transport.disconnect()
         withTimeout(5_000) {

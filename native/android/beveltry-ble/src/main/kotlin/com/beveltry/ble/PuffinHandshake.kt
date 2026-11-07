@@ -9,9 +9,14 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
 import java.security.SecureRandom
 
@@ -44,6 +49,14 @@ sealed class PuffinHandshakeError(message: String) : Exception(message) {
     data class TransportFailure(val reason: String) : PuffinHandshakeError(reason)
 }
 
+data class OffloadProgress(
+    val recordsReceived: Int,
+    val cursorsAcknowledged: Int,
+    val lastSeenTimestamp: Instant?,
+    val completed: Boolean,
+    val timedOut: Boolean,
+)
+
 interface PuffinHandshakeDelegate {
     fun didChangeState(handshake: PuffinHandshake, state: HandshakeState)
     fun didReceiveRawFrame(handshake: PuffinHandshake, frame: PuffinFrame)
@@ -62,6 +75,7 @@ class PuffinHandshake(
     private val random = SecureRandom()
     private var sequence = 1
     private var operation: Deferred<Unit>? = null
+    @Volatile private var offloadStop: Channel<Unit>? = null
     private var didReportFailure = false
 
     private val flags = listOf(
@@ -108,6 +122,10 @@ class PuffinHandshake(
 
     fun cancel() {
         operation?.cancel(CancellationException("Richiesta di annullamento"))
+    }
+
+    fun stop() {
+        offloadStop?.trySend(Unit)
     }
 
     private suspend fun run() {
@@ -165,19 +183,6 @@ class PuffinHandshake(
             waitForResponse(0x22, rangeSequence, inbox)
 
             transition(HandshakeState.Ready)
-            transition(HandshakeState.StartingHistorical)
-            val historicalSequence = nextSequence()
-            transport.write(encode(byteArrayOf(0x23, historicalSequence.toByte(), 0x16, 0x00)), PuffinCharacteristic.CMD_TO_STRAP)
-            val metadata = waitForFirstMetadata(inbox)
-            if (metadata.rawPayload.size < 21) throw PuffinHandshakeError.UnexpectedResponse(0x31)
-
-            val ackSequence = nextSequence()
-            val cursor = metadata.rawPayload.copyOfRange(13, 21)
-            val ackPayload = byteArrayOf(0x23, ackSequence.toByte(), 0x17, 0x01) + cursor
-            if (transport !is PuffinAutoAcknowledgingTransport) {
-                transport.write(encode(ackPayload), PuffinCharacteristic.CMD_TO_STRAP)
-            }
-            transition(HandshakeState.OffloadStarted)
         } catch (error: PuffinHandshakeError) {
             fail(error)
             throw error
@@ -194,20 +199,104 @@ class PuffinHandshake(
         }
     }
 
+    /** Inoltra record storici e conferma un solo ACK per cursor consecutivo distinto. */
+    fun offloadHistorical(
+        endTimestamp: Instant? = null,
+        timeoutMillis: Long = 60_000,
+        onRecord: (PuffinFrame) -> Unit = {},
+    ): Flow<OffloadProgress> = flow {
+        require(timeoutMillis > 0) { "Il timeout offload deve essere positivo" }
+        check(state == HandshakeState.Ready || state == HandshakeState.OffloadStarted) {
+            "Eseguire start() prima dell'offload storico"
+        }
+        coroutineScope {
+            val inbox = Channel<Pair<PuffinFrame, PuffinCharacteristic>>(Channel.UNLIMITED)
+            val stop = Channel<Unit>(Channel.CONFLATED)
+            offloadStop = stop
+            val collector = launch { transport.incomingFrames().collect { inbox.send(it) } }
+            var recordsReceived = 0
+            var cursorsAcknowledged = 0
+            var lastSeenTimestamp: Instant? = null
+            var lastCursor: ByteArray? = null
+            var completed = false
+            var timedOut = false
+            try {
+                transition(HandshakeState.StartingHistorical)
+                sendCommand(0x16, byteArrayOf(0x00))
+                transition(HandshakeState.OffloadStarted)
+                val endedByTimeout = withTimeoutOrNull(timeoutMillis) {
+                    while (true) {
+                        val incoming = select<Pair<PuffinFrame, PuffinCharacteristic>?> {
+                            inbox.onReceiveCatching { it.getOrNull() }
+                            stop.onReceive { null }
+                        }
+                        if (incoming == null) { completed = true; break }
+                        val (frame, characteristic) = incoming
+                        val bytes = frame.rawPayload
+                        when (bytes.firstOrNull()?.toInt()?.and(0xFF)) {
+                            0x2F -> {
+                                onRecord(frame)
+                                recordsReceived++
+                                if (bytes.size >= 11) {
+                                    lastSeenTimestamp = Instant.ofEpochSecond(readU32(bytes, 7))
+                                }
+                                emit(OffloadProgress(recordsReceived, cursorsAcknowledged, lastSeenTimestamp, false, false))
+                                if (endTimestamp != null && lastSeenTimestamp != null && lastSeenTimestamp!! >= endTimestamp) {
+                                    completed = true
+                                    break
+                                }
+                            }
+                            0x31 -> if (characteristic == PuffinCharacteristic.DATA_FROM_STRAP && bytes.size >= 21) {
+                                val cursor = bytes.copyOfRange(13, 21)
+                                if (lastCursor == null || !cursor.contentEquals(lastCursor)) {
+                                    withTimeout(800) {
+                                        sendCommand(0x17, byteArrayOf(0x01) + cursor)
+                                    }
+                                    lastCursor = cursor
+                                    cursorsAcknowledged++
+                                    emit(OffloadProgress(recordsReceived, cursorsAcknowledged, lastSeenTimestamp, false, false))
+                                }
+                            }
+                            0x24 -> if (characteristic == PuffinCharacteristic.CMD_FROM_STRAP) {
+                                delegate?.didReceiveRawFrame(this@PuffinHandshake, frame)
+                            }
+                        }
+                    }
+                    false
+                }
+                if (endedByTimeout == null) timedOut = true
+            } finally {
+                offloadStop = null
+                collector.cancel()
+                inbox.close()
+                stop.close()
+            }
+            transition(HandshakeState.Ready)
+            emit(OffloadProgress(recordsReceived, cursorsAcknowledged, lastSeenTimestamp, completed, timedOut))
+        }
+    }
+
+    private suspend fun sendCommand(opcode: Int, suffix: ByteArray) {
+        val payload = byteArrayOf(0x23, nextSequence().toByte(), opcode.toByte()) + suffix
+        transport.write(encode(payload), PuffinCharacteristic.CMD_TO_STRAP)
+    }
+
+    private fun readU32(bytes: ByteArray, offset: Int): Long =
+        (bytes[offset].toLong() and 0xFF) or
+            ((bytes[offset + 1].toLong() and 0xFF) shl 8) or
+            ((bytes[offset + 2].toLong() and 0xFF) shl 16) or
+            ((bytes[offset + 3].toLong() and 0xFF) shl 24)
+
     private suspend fun readClock(inbox: Channel<Pair<PuffinFrame, PuffinCharacteristic>>): UInt {
         val seq = nextSequence()
         val response = sendAndAcknowledge(
             byteArrayOf(0x23, seq.toByte(), 0x0B, 0x00), 0x0B, seq, inbox, returnFrame = true,
         ) ?: throw PuffinHandshakeError.UnexpectedResponse(0x0B)
         val bytes = response.rawPayload
-        if (bytes.size < 8) throw PuffinHandshakeError.UnexpectedResponse(0x0B)
-        if ((bytes[3].toInt() and 0xFF) != 0x01) {
-            throw PuffinHandshakeError.AckStatusFailure(0x0B, bytes[3].toInt() and 0xFF)
-        }
-        return (bytes[4].toUInt() and 0xFFu) or
-            ((bytes[5].toUInt() and 0xFFu) shl 8) or
-            ((bytes[6].toUInt() and 0xFFu) shl 16) or
-            ((bytes[7].toUInt() and 0xFFu) shl 24)
+        if (bytes.size < 9) throw PuffinHandshakeError.UnexpectedResponse(0x0B)
+        val timestamp = readU32(bytes, 5)
+        if (timestamp <= 1_700_000_000L) throw PuffinHandshakeError.ClockNotLatched
+        return timestamp.toUInt()
     }
 
     private suspend fun sendAndAcknowledge(
@@ -226,8 +315,10 @@ class PuffinHandshake(
             transport.write(frame, PuffinCharacteristic.CMD_TO_STRAP)
             try {
                 val response = waitForResponse(opcode, seq, inbox)
-                val status = response.rawPayload.getOrNull(3)?.toInt()?.and(0xFF) ?: 0
-                if (status != 0x01) {
+                val responseBytes = response.rawPayload
+                val statusIndex = if (responseBytes.size >= 5) 4 else 3
+                val status = responseBytes.getOrNull(statusIndex)?.toInt()?.and(0xFF) ?: 0
+                if (status !in setOf(0x00, 0x01)) {
                     lastError = PuffinHandshakeError.AckStatusFailure(opcode, status)
                     if (retryOnce && attempt == 0) return@repeat
                     throw lastError
@@ -250,24 +341,15 @@ class PuffinHandshake(
             val (frame, characteristic) = nextIncoming(opcode, inbox)
             delegate?.didReceiveRawFrame(this, frame)
             val bytes = frame.rawPayload
-            if (characteristic != PuffinCharacteristic.CMD_FROM_STRAP || bytes.size < 3 ||
+            if (characteristic != PuffinCharacteristic.CMD_FROM_STRAP || bytes.size < 4 ||
                 (bytes[0].toInt() and 0xFF) != 0x24 || (bytes[1].toInt() and 0xFF) != seq
             ) continue
             val responseOpcode = bytes[2].toInt() and 0xFF
             if (responseOpcode != opcode) throw PuffinHandshakeError.UnexpectedResponse(responseOpcode)
+            val statusIndex = if (bytes.size >= 5) 4 else 3
+            val status = bytes[statusIndex].toInt() and 0xFF
+            if (status !in 0x00..0x01) throw PuffinHandshakeError.AckStatusFailure(opcode, status)
             return frame
-        }
-    }
-
-    private suspend fun waitForFirstMetadata(
-        inbox: Channel<Pair<PuffinFrame, PuffinCharacteristic>>,
-    ): PuffinFrame {
-        while (true) {
-            val (frame, characteristic) = nextIncoming(0x31, inbox)
-            delegate?.didReceiveRawFrame(this, frame)
-            if (characteristic == PuffinCharacteristic.DATA_FROM_STRAP && frame.rawPayload.firstOrNull()?.toInt()?.and(0xFF) == 0x31) {
-                return frame
-            }
         }
     }
 

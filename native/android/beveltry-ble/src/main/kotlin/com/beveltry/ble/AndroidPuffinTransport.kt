@@ -10,23 +10,16 @@ import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicInteger
 
 sealed interface AndroidBleState {
     data object Disconnected : AndroidBleState
@@ -39,7 +32,7 @@ sealed interface AndroidBleState {
 class AndroidPuffinTransport(
     context: Context,
     private val bonder: WhoopBonder = WhoopBonder(context.applicationContext),
-) : PuffinTransport, PuffinAutoAcknowledgingTransport {
+) : PuffinTransport {
     private val appContext = context.applicationContext
     private val operationMutex = Mutex()
     private val gate = Any()
@@ -48,8 +41,6 @@ class AndroidPuffinTransport(
     private val reassemblers = PuffinCharacteristic.entries.associateWith { PuffinFrameReassembler() }
     private val frames = MutableSharedFlow<Pair<PuffinFrame, PuffinCharacteristic>>(extraBufferCapacity = 128)
     private val heartRates = MutableSharedFlow<ByteArray>(extraBufferCapacity = 64)
-    private var ackScope = newAckScope()
-    private val ackSequence = AtomicInteger(1)
     private var pending: CompletableDeferred<Int>? = null
     @Volatile var state: AndroidBleState = AndroidBleState.Disconnected
         private set
@@ -108,30 +99,7 @@ class AndroidPuffinTransport(
                 return
             }
             val kind = characteristics.entries.firstOrNull { it.value.uuid == characteristic.uuid }?.key ?: return
-            reassemblers.getValue(kind).feed(value).forEach { frame ->
-                if (frame.rawPayload.firstOrNull()?.toInt()?.and(0xFF) == HISTORICAL_FRAME_TYPE) {
-                    acknowledgeHistoricalFrame(frame)
-                }
-                frames.tryEmit(frame to kind)
-            }
-        }
-    }
-
-    private fun acknowledgeHistoricalFrame(frame: PuffinFrame) {
-        if (frame.rawPayload.size < HISTORICAL_CURSOR_END) {
-            Log.w(TAG, "Frame 0x31 troppo corto per il cursore ACK: ${frame.rawPayload.size} byte")
-            return
-        }
-        val cursor = frame.rawPayload.copyOfRange(HISTORICAL_CURSOR_START, HISTORICAL_CURSOR_END)
-        val sequence = ackSequence.getAndUpdate { if (it >= 0xFF) 1 else it + 1 }
-        val payload = byteArrayOf(0x23, sequence.toByte(), 0x17, 0x01) + cursor
-        ackScope.launch {
-            try {
-                write(PuffinFrameCodec.encode(1, payload), PuffinCharacteristic.CMD_TO_STRAP)
-                Log.i(TAG, "ACK 0x17 inviato per frame 0x31 cursor=${cursor.joinToString("") { "%02x".format(it) }}")
-            } catch (error: Exception) {
-                Log.e(TAG, "ACK 0x17 fallito per frame 0x31", error)
-            }
+            reassemblers.getValue(kind).feed(value).forEach { frames.tryEmit(it to kind) }
         }
     }
 
@@ -267,13 +235,10 @@ class AndroidPuffinTransport(
         connection?.close()
         ConnectedDeviceForegroundService.stop(appContext)
         reassemblers.values.forEach(PuffinFrameReassembler::reset)
-        ackScope.cancel()
-        ackScope = newAckScope()
     }
 
     private class GattWriteException(val status: Int) : Exception("Scrittura GATT status $status")
 
-    private fun newAckScope() = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     companion object {
         private const val OPERATION_TIMEOUT_MS = 8_000L
@@ -282,10 +247,6 @@ class AndroidPuffinTransport(
         private const val GATT_INSUFFICIENT_AUTHENTICATION = 5
         private const val GATT_INSUFFICIENT_ENCRYPTION = 15
         private const val GATT_CONN_TERMINATE_PEER_USER = 14
-        private const val HISTORICAL_FRAME_TYPE = 0x31
-        private const val HISTORICAL_CURSOR_START = 13
-        private const val HISTORICAL_CURSOR_END = 21
-        private const val TAG = "BeveltryBLE"
         val WHOOP_SERVICE_UUID: UUID = WhoopScanner.WHOOP_SERVICE_UUID
         val WHOOP_CHARACTERISTIC_UUIDS = mapOf(
             PuffinCharacteristic.CMD_TO_STRAP to UUID.fromString("fd4b0002-cce1-4033-93ce-002d5875f58a"),
