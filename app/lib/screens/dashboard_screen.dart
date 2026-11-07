@@ -33,11 +33,15 @@ class DashboardScreenState extends State<DashboardScreen> {
 
   DailyMetrics? _latestMetrics;
   bool _isCalculating = false;
+  bool _isVibrating = false;
   final List<String> _logs = [];
   final ScrollController _logScrollController = ScrollController();
 
   @visibleForTesting
   bool get isCalculating => _isCalculating;
+
+  @visibleForTesting
+  bool get isVibrating => _isVibrating;
 
   @visibleForTesting
   DailyMetrics? get latestMetrics => _latestMetrics;
@@ -128,6 +132,26 @@ class DashboardScreenState extends State<DashboardScreen> {
     } finally {
       if (mounted) {
         setState(() => _isCalculating = false);
+      }
+    }
+  }
+
+  Future<void> _handleTestVibration() async {
+    setState(() => _isVibrating = true);
+    _addLog('Invio comando vibrazione 0x42 (slot 1)...');
+
+    try {
+      final success = await _syncService.sendVibration(slot: 1, pattern: 1, durationMs: 1000);
+      if (success) {
+        _addLog('Vibrazione attivata con successo sul cinturino (0x42).');
+      } else {
+        _addLog('Impossibile attivare la vibrazione: trasporto non connesso.');
+      }
+    } catch (e) {
+      _addLog('Errore durante l\'invio della vibrazione: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isVibrating = false);
       }
     }
   }
@@ -231,9 +255,33 @@ class DashboardScreenState extends State<DashboardScreen> {
                   );
                 },
               ),
+              const SizedBox(height: 12),
+
+              // 3. Pulsante Test Vibrazione (Opcode 0x42)
+              ElevatedButton.icon(
+                key: const Key('vibration_button'),
+                onPressed: _syncService.isSyncing || _isCalculating || _isVibrating
+                    ? null
+                    : _handleTestVibration,
+                icon: _isVibrating
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.vibration),
+                label: Text(
+                  _isVibrating ? 'Vibrazione in corso...' : 'Test Vibrazione',
+                ),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                  foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
+                ),
+              ),
               const SizedBox(height: 16),
 
-              // 3. Log delle Operazioni a schermo
+              // 4. Log delle Operazioni a schermo
               const Text(
                 'Log Operazioni',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),

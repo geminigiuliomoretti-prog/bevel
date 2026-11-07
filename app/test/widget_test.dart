@@ -44,9 +44,10 @@ void main() {
     expect(find.text('HRV (RMSSD)'), findsOneWidget);
     expect(find.text('Dati insufficienti'), findsNWidgets(2));
 
-    // 3. Due pulsanti
+    // 3. Tre pulsanti di azione
     expect(find.text('Sincronizza WHOOP'), findsOneWidget);
     expect(find.text('Calcola Metriche'), findsOneWidget);
+    expect(find.text('Test Vibrazione'), findsOneWidget);
 
     // 4. Sezione log
     expect(find.text('Log Operazioni'), findsOneWidget);
@@ -117,6 +118,38 @@ void main() {
     expect(find.textContaining('Calcolo completato'), findsOneWidget);
 
     // Smonta il widget per invocare dispose() prima di chiudere il repository
+    await tester.pumpWidget(const SizedBox());
+    await repository.close();
+  });
+
+  testWidgets('Dashboard UI: click su Test Vibrazione invia il comando 0x42 e aggiorna il log', (tester) async {
+    final repository = WhoopRepository.inMemory();
+    final syncService = SyncService(
+      repository: repository,
+      simulateIfNoHardware: true,
+    );
+    final metricsService = MetricsService(repository: repository);
+
+    await tester.pumpWidget(MaterialApp(
+      home: DashboardScreen(
+        repository: repository,
+        syncService: syncService,
+        metricsService: metricsService,
+      ),
+    ));
+    await tester.pump();
+
+    final vibButton = find.text('Test Vibrazione');
+    expect(vibButton, findsOneWidget);
+
+    await tester.runAsync(() async {
+      await tester.tap(vibButton);
+      await Future.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pump();
+
+    expect(find.textContaining('Vibrazione attivata con successo'), findsOneWidget);
+
     await tester.pumpWidget(const SizedBox());
     await repository.close();
   });

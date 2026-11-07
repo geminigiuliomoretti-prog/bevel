@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../ble/ble.dart';
 import '../records/record_decoder.dart';
 import '../records/v18_record.dart';
 import '../repository/whoop_repository.dart';
@@ -22,18 +23,22 @@ enum SyncStatus {
 /// - Decodificare i frame `0x2F` tramite [RecordDecoder]
 /// - Salvare i record [V18Record] nel [WhoopRepository]
 /// - Notificare lo stato e il conteggio di avanzamento
+/// - Inviare comandi al cinturino tramite [PuffinTransport] (es. vibrazione 0x42)
 class SyncService {
   SyncService({
     required this.repository,
     this.strapSerial = '5AG0558675',
     Stream<Uint8List>? frameStream,
     this.simulateIfNoHardware = true,
-  }) : _customFrameStream = frameStream;
+    PuffinTransport? transport,
+  })  : _customFrameStream = frameStream,
+        transport = transport ?? SimulatedPuffinTransport();
 
   final WhoopRepository repository;
   final String strapSerial;
   final Stream<Uint8List>? _customFrameStream;
   final bool simulateIfNoHardware;
+  final PuffinTransport transport;
 
   final ValueNotifier<SyncStatus> statusNotifier =
       ValueNotifier<SyncStatus>(SyncStatus.idle);
@@ -42,10 +47,55 @@ class SyncService {
   final ValueNotifier<int> recordsSavedNotifier = ValueNotifier<int>(0);
 
   bool _isCancelled = false;
+  int _commandSeq = 1;
 
   bool get isSyncing =>
       statusNotifier.value == SyncStatus.connecting ||
       statusNotifier.value == SyncStatus.syncing;
+
+  int _nextSeq() {
+    final s = _commandSeq;
+    _commandSeq = (_commandSeq % 255) + 1;
+    return s;
+  }
+
+  /// Invia il comando 0x42 (SET_ALARM_TIME / ALARM_CONTROL) per far vibrare il cinturino.
+  ///
+  /// Parametri:
+  /// - [slot]: indice slot sveglia (default 1)
+  /// - [pattern]: pattern di vibrazione (default 1)
+  /// - [durationMs]: durata in millisecondi (default 1000 ms)
+  Future<bool> sendVibration({
+    int slot = 1,
+    int pattern = 1,
+    int durationMs = 1000,
+  }) async {
+    if (!transport.isConnected) {
+      statusMessageNotifier.value =
+          'Impossibile inviare vibrazione: cinturino non connesso.';
+      return false;
+    }
+
+    final seq = _nextSeq();
+    final innerCmd = Uint8List.fromList([
+      0x23,
+      seq,
+      0x42, // Opcode SET_ALARM_TIME / ALARM_CONTROL
+      slot & 0xFF,
+      pattern & 0xFF,
+      durationMs & 0xFF,
+      (durationMs >> 8) & 0xFF,
+    ]);
+
+    final frame = PuffinFrameCodec.encode(1, innerCmd);
+    await transport.write(
+      frame,
+      characteristic: PuffinCharacteristic.cmdToStrap,
+    );
+    statusMessageNotifier.value =
+        'Comando vibrazione 0x42 inviato con successo (slot $slot).';
+    return true;
+  }
 
   /// Avvia l'offload e la memorizzazione dei record.
   ///
