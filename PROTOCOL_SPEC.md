@@ -110,24 +110,24 @@ I decoder puri Dart si trovano in `app/lib/src/records/`. Ricevono il payload in
 
 ### V18Record (`0x2F`, versione `0x12`, 112 byte inner)
 
-| Offset payload | Tipo | Campo | Interpretazione |
-|---:|---|---|---|
-| 2–3 | u16 | `seq` | Sequenza |
-| 7–10 | u32 | `timestampSeconds` | Unix seconds, esposto come `DateTime` UTC |
-| 14 | u8 | `hrPrimary` | BPM; `0` indica off-wrist |
-| 15 | u8 | `rrCount` | Da 0 a 4 |
-| 16–23 | 4×u16 | `rrIntervalsMs` | Millisecondi diretti; sono esposti solo i primi `rrCount` valori |
-| 29 | u8 | `hrSecondary` | HR smoothed |
-| 37, 41, 45 | 3×f32 | `gravityXyz` | X, Y, Z in g; da Argon, da validare su cattura estesa |
-| 57–58 | u16 | `stepCounter` | Da Argon, da validare su cattura estesa |
-| 61–62 / 63–64 | i16 | `skinTempRaw` | Prova a @61, fallback a @63 se il primo valore non è plausibile; da Argon |
-| 64 | u8 | `activityFlag` | Da Argon, da validare su cattura estesa |
-| 82 | u8 | `spo2Candidate` | Byte grezzo candidato; non viene decodificato come SpO₂ |
-| 96 | u8 | `sleepState` | Da Argon, da validare su cattura estesa |
-| 98–99 | u16 | `opticalBaselineCh1` | Da Argon, da validare su cattura estesa |
-| 106–107 | u16 | `opticalBaselineCh2` | Da Argon, da validare su cattura estesa |
+| Offset payload | Tipo | Campo | Interpretazione | Stato di verifica |
+|---:|---|---|---|---|
+| 2–3 | u16 | `seq` | Sequenza | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 7–10 | u32 | `timestampSeconds` | Unix seconds, esposto come `DateTime` UTC | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 14 | u8 | `hrPrimary` | BPM; `0` indica off-wrist | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 15 | u8 | `rrCount` | Da 0 a 4 | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 16–23 | 4×u16 | `rrIntervalsMs` | Millisecondi diretti (nessuna scala 1/1024s); esposti primi `rrCount` | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 29 | u8 | `hrSecondary` | HR smoothed | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 37, 41, 45 | 3×f32 | `gravityXyz` | X, Y, Z in g | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 57–58 | u16 | `stepCounter` | Conteggio passi cumulativo | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 61–62 / 63–64 | i16 | `skinTempRaw` | Prova a @61, fallback a @63 se non plausibile | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 64 | u8 | `activityFlag` | Flag di attività | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 82 | u8 | `spo2Candidate` | Byte grezzo candidato; non viene decodificato come SpO₂ | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 96 | u8 | `sleepState` | Stato del sonno | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 98–99 | u16 | `opticalBaselineCh1` | Canale ottico baseline 1 | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
+| 106–107 | u16 | `opticalBaselineCh2` | Canale ottico baseline 2 | Verificato su hardware (FW 50.41.1.0, Serial 5AG0558675) |
 
-La cattura reale dal firmware `50.41.1.0` conferma i campi seq, timestamp, HR primaria e R-R. Gli offset Argon restano sperimentali. Il decoder non interpreta altri offset.
+Tutti gli offset V18 e le unità RR (millisecondi diretti) sono contrassegnati come: **Verificati su hardware (FW 50.41.1.0, Serial 5AG0558675)**.
 
 `spo2Candidate` all'offset 82 è `0x00` senza entitlement. Il decoder lo conserva come byte grezzo e non tenta di ricavarne SpO₂.
 
@@ -165,12 +165,15 @@ Questi comportamenti sono requisiti/risultati preliminari riportati dal progetto
 
 ## Requisiti background per un milestone BLE successivo
 
+> [!NOTE]
+> La ricezione continua in background (se l'app viene chiusa) verrà gestita nel Livello 1 nativo in un secondo momento. Per ora l'app deve funzionare in foreground.
+
 - iOS: `UIBackgroundModes` con `bluetooth-central`, `CBCentralManagerOptionRestoreIdentifierKey` e `NSBluetoothAlwaysUsageDescription`. CoreBluetooth non è disponibile nel simulatore.
 - Android: `ForegroundService` con `foregroundServiceType="connectedDevice"` e WorkManager per la riconnessione.
 
-## Offset da Argon da validare su cattura estesa
+## Offset V18 verificati su hardware reale
 
-La cattura firmware `50.41.1.0` conferma gli offset seq @2, timestamp @7, HR primaria @14, rrCount @15 e RR @16+ in millisecondi. Restano da validare su cattura estesa: gravity @37/41/45, stepCounter @57, skinTemp @61/63, activityFlag @64, candidato grezzo `spo2Candidate` @82, sleepState @96 e opticalBaseline @98/106. Non vengono assunte semantiche ulteriori.
+Tutti gli offset V18 (seq @2, timestamp @7, HR primaria @14, rrCount @15, RR @16+ in millisecondi diretti, HR secondaria @29, gravity @37/41/45, stepCounter @57, skinTemp @61/63, activityFlag @64, candidato grezzo `spo2Candidate` @82, sleepState @96 e opticalBaseline @98/106) sono contrassegnati come **Verificati su hardware (FW 50.41.1.0, Serial 5AG0558675)**.
 
 Il frame v18 è lungo 124 byte sul cavo: 8 header + 112 inner + 4 CRC32. `payloadLen=116` rappresenta 112 byte inner più il CRC32. `V18Record.decode` accetta solo 108–112 byte di inner payload; non interpreta un frame da 124 byte.
 
