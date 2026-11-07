@@ -22,8 +22,13 @@ class DailyMetrics {
   /// Data e ora del calcolo.
   final DateTime calculatedAt;
 
+  /// Indica se il valore RMSSD calcolato è fisiologicamente valido
+  /// (non nullo, maggiore di zero e calcolato su almeno 10 record).
+  bool get isHrvValid =>
+      hrvRmssd != null && hrvRmssd! > 0.0 && recordCount >= 10;
+
   /// Indica se almeno una metrica valida è stata calcolata.
-  bool get hasValidMetrics => rhr != null || hrvRmssd != null;
+  bool get hasValidMetrics => rhr != null || isHrvValid;
 }
 
 /// Servizio che legge i record memorizzati nel database locale e calcola le metriche fisiologiche.

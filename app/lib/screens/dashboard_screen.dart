@@ -113,8 +113,14 @@ class DashboardScreenState extends State<DashboardScreen> {
       if (metrics.recordCount == 0) {
         _addLog('Nessun dato scaricato: database vuoto per le ultime 24h.');
       } else {
+        final rhrStr = metrics.rhr != null ? '${metrics.rhr} bpm' : 'Dati insufficienti';
+        final hrvStr = (metrics.hrvRmssd == null ||
+                metrics.hrvRmssd == 0.0 ||
+                metrics.recordCount < 10)
+            ? 'Dati insufficienti'
+            : '${metrics.hrvRmssd} ms';
         _addLog(
-          'Calcolo completato: ${metrics.recordCount} record analizzati. RHR: ${metrics.rhr ?? "-"} bpm, HRV: ${metrics.hrvRmssd ?? "-"} ms.',
+          'Calcolo completato: ${metrics.recordCount} record analizzati. RHR: $rhrStr, HRV: $hrvStr.',
         );
       }
     } catch (e) {
@@ -158,9 +164,12 @@ class DashboardScreenState extends State<DashboardScreen> {
                     child: _buildMetricCard(
                       title: 'HRV (RMSSD)',
                       subtitle: 'Variabilità Cardiaca',
-                      value: _latestMetrics?.hrvRmssd != null
-                          ? '${_latestMetrics!.hrvRmssd} ms'
-                          : 'Dati insufficienti',
+                      value: (_latestMetrics == null ||
+                              _latestMetrics!.hrvRmssd == null ||
+                              _latestMetrics!.hrvRmssd == 0.0 ||
+                              _latestMetrics!.recordCount < 10)
+                          ? 'Dati insufficienti'
+                          : '${_latestMetrics!.hrvRmssd} ms',
                       icon: Icons.timeline,
                       color: Colors.teal,
                     ),

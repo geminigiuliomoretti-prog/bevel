@@ -104,15 +104,14 @@ void main() {
     });
     await tester.pump();
 
-    // Verifica che le card e il log siano popolati con valori validi
+    // Verifica che la card RHR sia valorizzata e che la card HRV mostri "Dati insufficienti"
+    // (a causa di HRV = 0.0 su 30 record a frequenza costante)
     expect(find.textContaining('bpm'), findsAtLeastNWidgets(1));
-    expect(find.textContaining('ms'), findsAtLeastNWidgets(1));
+    expect(find.text('Dati insufficienti'), findsAtLeastNWidgets(1));
     expect(state.latestMetrics, isNotNull);
     expect(state.latestMetrics!.rhr, isNotNull);
-    expect(state.latestMetrics!.hrvRmssd, isNotNull);
-
-    // Non devono più esserci "Dati insufficienti"
-    expect(find.text('Dati insufficienti'), findsNothing);
+    expect(state.latestMetrics!.hrvRmssd, equals(0.0));
+    expect(state.latestMetrics!.isHrvValid, isFalse);
 
     // Verifica che il log indichi il calcolo avvenuto
     expect(find.textContaining('Calcolo completato'), findsOneWidget);

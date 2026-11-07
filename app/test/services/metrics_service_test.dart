@@ -34,6 +34,21 @@ void main() {
       expect(metrics.hasValidMetrics, isFalse);
     });
 
+    test('DailyMetrics valida isHrvValid solo con HRV > 0 e recordCount >= 10', () {
+      final now = DateTime.utc(2026, 11, 7, 8, 0, 0);
+      final zeroHrv = DailyMetrics(rhr: 68, hrvRmssd: 0.0, recordCount: 30, calculatedAt: now);
+      expect(zeroHrv.isHrvValid, isFalse);
+
+      final fewRecords = DailyMetrics(rhr: 68, hrvRmssd: 45.0, recordCount: 5, calculatedAt: now);
+      expect(fewRecords.isHrvValid, isFalse);
+
+      final nullHrv = DailyMetrics(rhr: 68, hrvRmssd: null, recordCount: 30, calculatedAt: now);
+      expect(nullHrv.isHrvValid, isFalse);
+
+      final validHrv = DailyMetrics(rhr: 68, hrvRmssd: 45.0, recordCount: 30, calculatedAt: now);
+      expect(validHrv.isHrvValid, isTrue);
+    });
+
     test('MetricsService calcola RHR ed HRV corretti per una notte di dati sintetici', () async {
       final now = DateTime.utc(2026, 11, 7, 8, 0, 0);
       final records = <V18Record>[];
