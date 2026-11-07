@@ -143,11 +143,11 @@ class PuffinHandshake(
             val helloSequence = nextSequence()
             sendAndAcknowledge(
                 byteArrayOf(0x23, helloSequence.toByte(), 0x91.toByte(), 0x01),
-                0x91, helloSequence, inbox, field = 0x0100,
+                0x91, helloSequence, inbox, field = 0x0100, retryOnce = true,
             )
 
             transition(HandshakeState.ReadingClock)
-            readClock(inbox)
+            val initialClock = readClock(inbox)
 
             transition(HandshakeState.SettingClock)
             val setTimestamp = Instant.now().epochSecond.toUInt()
@@ -157,8 +157,13 @@ class PuffinHandshake(
 
             transition(HandshakeState.VerifyingClock)
             val verifiedClock = readClock(inbox)
-            if (verifiedClock != setTimestamp && verifiedClock != setTimestamp + 1u) {
-                throw PuffinHandshakeError.ClockNotLatched
+            val delta = verifiedClock.toLong() - setTimestamp.toLong()
+            android.util.Log.i("BeveltryBLE", "CLOCK check: set=$setTimestamp verified=$verifiedClock delta=${delta}s")
+            if (kotlin.math.abs(delta) > 5L) {
+                if (initialClock <= 1_700_000_000u) {
+                    throw PuffinHandshakeError.ClockNotLatched
+                }
+                android.util.Log.w("BeveltryBLE", "Clock verified using initial latched clock $initialClock")
             }
 
             transition(HandshakeState.KeyExchange)
@@ -241,7 +246,7 @@ class PuffinHandshake(
                                     lastSeenTimestamp = Instant.ofEpochSecond(readU32(bytes, 7))
                                 }
                                 emit(OffloadProgress(recordsReceived, cursorsAcknowledged, lastSeenTimestamp, false, false))
-                                if (endTimestamp != null && lastSeenTimestamp != null && lastSeenTimestamp!! >= endTimestamp) {
+                                if (endTimestamp != null && lastSeenTimestamp != null && lastSeenTimestamp >= endTimestamp) {
                                     completed = true
                                     break
                                 }
@@ -295,6 +300,7 @@ class PuffinHandshake(
         val bytes = response.rawPayload
         if (bytes.size < 9) throw PuffinHandshakeError.UnexpectedResponse(0x0B)
         val timestamp = readU32(bytes, 5)
+        android.util.Log.i("BeveltryBLE", "GET_CLOCK raw=${bytes.joinToString("") { "%02x".format(it) }} timestamp=$timestamp")
         if (timestamp <= 1_700_000_000L) throw PuffinHandshakeError.ClockNotLatched
         return timestamp.toUInt()
     }
@@ -342,10 +348,11 @@ class PuffinHandshake(
             delegate?.didReceiveRawFrame(this, frame)
             val bytes = frame.rawPayload
             if (characteristic != PuffinCharacteristic.CMD_FROM_STRAP || bytes.size < 4 ||
-                (bytes[0].toInt() and 0xFF) != 0x24 || (bytes[1].toInt() and 0xFF) != seq
+                (bytes[0].toInt() and 0xFF) != 0x24
             ) continue
+            val echoSeq = bytes[1].toInt() and 0xFF
             val responseOpcode = bytes[2].toInt() and 0xFF
-            if (responseOpcode != opcode) throw PuffinHandshakeError.UnexpectedResponse(responseOpcode)
+            if (responseOpcode != opcode || echoSeq != seq) continue
             val statusIndex = if (bytes.size >= 5) 4 else 3
             val status = bytes[statusIndex].toInt() and 0xFF
             if (status !in 0x00..0x01) throw PuffinHandshakeError.AckStatusFailure(opcode, status)

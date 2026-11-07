@@ -11,6 +11,7 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
+import android.util.Log
 import android.os.ParcelUuid
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -49,6 +50,7 @@ class WhoopScanner(
                 return@callbackFlow
             }
         val seen = ConcurrentHashMap.newKeySet<String>()
+        val loggedAdvertisements = ConcurrentHashMap.newKeySet<String>()
         var fallbackStarted = false
         var resultFound = false
 
@@ -66,9 +68,16 @@ class WhoopScanner(
             }
 
             private fun handleResult(result: ScanResult) {
-                if (resultFound || !isWhoopCandidate(result)) return
+                if (resultFound) return
                 val device = result.device
-                val name = result.scanRecord?.deviceName ?: safeDeviceName(device) ?: "WHOOP 5.0"
+                val advertisedName = result.scanRecord?.deviceName ?: safeDeviceName(device)
+                val uuids = result.scanRecord?.serviceUuids.orEmpty().map { it.uuid }
+                val logKey = "${advertisedName.orEmpty()}|${uuids.sortedBy(UUID::toString).joinToString()}"
+                if (loggedAdvertisements.add(logKey)) {
+                    Log.d(TAG, "ADV name=${advertisedName ?: "<none>"} rssi=${result.rssi} uuids=$uuids manufacturers=${manufacturerSummary(result)}")
+                }
+                if (!isWhoopCandidate(result)) return
+                val name = advertisedName ?: "WHOOP 5.0"
                 if (!seen.add(device.address)) return
 
                 resultFound = true
@@ -157,6 +166,14 @@ class WhoopScanner(
         }
     }
 
+    private fun manufacturerSummary(result: ScanResult): String =
+        result.scanRecord?.manufacturerSpecificData?.let { data ->
+            (0 until data.size()).joinToString { index ->
+                val id = data.keyAt(index)
+                "$id:${data.valueAt(index)?.size ?: 0}B"
+            }
+        }.orEmpty()
+
     companion object {
         const val DEFAULT_TIMEOUT_MILLIS = 30_000L
         val WHOOP_SERVICE_UUID: UUID = UUID.fromString("fd4b0001-cce1-4033-93ce-002d5875f58a")
@@ -166,5 +183,6 @@ class WhoopScanner(
             ScanFilter.Builder().setServiceUuid(ParcelUuid(WHOOP_SERVICE_UUID)).build(),
         )
         val KNOWN_NAME_PREFIXES = listOf("WBB5AP", "5AG")
+        private const val TAG = "WhoopScanner"
     }
 }

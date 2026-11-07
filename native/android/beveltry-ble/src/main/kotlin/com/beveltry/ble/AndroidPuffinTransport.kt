@@ -81,8 +81,14 @@ class AndroidPuffinTransport(
             } catch (error: Exception) { fail(error.message ?: "Servizi WHOOP incompleti") }
         }
 
-        override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) = complete(status)
-        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) = complete(status)
+        override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            android.util.Log.i("BeveltryBLE", "onCharacteristicWrite uuid=${characteristic.uuid} status=$status")
+            complete(status)
+        }
+        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            android.util.Log.i("BeveltryBLE", "onDescriptorWrite uuid=${descriptor.characteristic.uuid} status=$status")
+            complete(status)
+        }
 
         @Suppress("DEPRECATION")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
@@ -94,6 +100,7 @@ class AndroidPuffinTransport(
         }
 
         private fun acceptNotification(characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+            android.util.Log.i("BeveltryBLE", "onCharacteristicChanged uuid=${characteristic.uuid} len=${value.size} hex=${value.joinToString("") { "%02x".format(it) }}")
             if (characteristic.uuid == HEART_RATE_MEASUREMENT_UUID) {
                 heartRates.tryEmit(value.copyOf())
                 return
@@ -143,6 +150,7 @@ class AndroidPuffinTransport(
     override suspend fun write(frame: ByteArray, characteristic: PuffinCharacteristic) {
         val decoded = PuffinFrameCodec.decode(frame)
         val payload = decoded.rawPayload
+        android.util.Log.i("BeveltryBLE", "GATT write to $characteristic: len=${frame.size} payloadHex=${payload.joinToString("") { "%02x".format(it) }}")
         if (payload.size >= 3 && payload[0] == 0x23.toByte()) {
             val opcode = payload[2].toInt() and 0xFF
             require(opcode != ERASE_OPCODE && opcode != REBOOT_OPCODE) { "Opcode distruttivo 0x${opcode.toString(16)} bloccato" }
@@ -150,6 +158,7 @@ class AndroidPuffinTransport(
         try {
             writeOnce(frame, characteristic)
         } catch (error: GattWriteException) {
+            android.util.Log.w("BeveltryBLE", "GATT write error status=${error.status}, requesting bonding")
             if (error.status != GATT_INSUFFICIENT_AUTHENTICATION && error.status != GATT_INSUFFICIENT_ENCRYPTION) throw error
             val device = synchronized(gate) { gatt?.device } ?: throw error
             bonder.bond(device)

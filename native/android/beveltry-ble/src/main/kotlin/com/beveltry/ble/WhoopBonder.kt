@@ -22,20 +22,23 @@ class WhoopBonder(private val context: Context) {
                 if (intent.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
                 @Suppress("DEPRECATION")
                 val changedDevice = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE) as? BluetoothDevice
-                if (changedDevice?.address != device.address) return
                 val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
+                android.util.Log.i("BeveltryBLE", "WhoopBonder: ACTION_BOND_STATE_CHANGED state=$state for ${changedDevice?.address}")
+                if (changedDevice?.address != device.address) return
                 if (state == BluetoothDevice.BOND_BONDED || state == BluetoothDevice.BOND_NONE) outcome.complete(state)
             }
         }
         val filter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
         if (Build.VERSION.SDK_INT >= 33) {
-            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
         } else {
             @Suppress("DEPRECATION") context.registerReceiver(receiver, filter)
         }
         try {
+            android.util.Log.i("BeveltryBLE", "WhoopBonder: createBond() on ${device.address}, bondState=${device.bondState}")
             if (!device.createBond()) throw pairingInstructions("Android ha rifiutato la richiesta di pairing")
             val state = withTimeout(timeoutMillis) { outcome.await() }
+            android.util.Log.i("BeveltryBLE", "WhoopBonder: bond outcome state=$state")
             if (state == BluetoothDevice.BOND_BONDED) return true
             throw pairingInstructions("Pairing rifiutato o terminato con status 14")
         } catch (error: WhoopBondException) {
