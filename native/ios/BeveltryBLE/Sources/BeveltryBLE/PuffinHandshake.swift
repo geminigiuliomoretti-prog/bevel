@@ -370,7 +370,7 @@ public final class PuffinHandshake {
         opcode: UInt8, reader: FrameIteratorBox, timeout: TimeInterval? = nil
     ) async throws -> (PuffinFrame, PuffinCharacteristic) {
         let wait = timeout ?? self.timeout
-        try await withThrowingTaskGroup(of: (PuffinFrame, PuffinCharacteristic)?.self) { group in
+        return try await withThrowingTaskGroup(of: (PuffinFrame, PuffinCharacteristic)?.self) { group in
             group.addTask { await reader.next() }
             group.addTask {
                 try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
