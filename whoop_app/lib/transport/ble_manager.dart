@@ -43,6 +43,9 @@ class WhoopBleManager extends ChangeNotifier {
   // Cursor Auto-ACK state
   String? _lastAckedCursor;
 
+  // Discovered devices list for manual user selection
+  final List<BleDevice> _discoveredDevices = [];
+
   // Device Info & Live State
   BleDevice? _targetDevice;
   StrapConnectionState _connectionState = StrapConnectionState.disconnected;
@@ -67,6 +70,8 @@ class WhoopBleManager extends ChangeNotifier {
 
   // Public Getters
   StrapConnectionState get connectionState => _connectionState;
+  List<BleDevice> get discoveredDevices => List.unmodifiable(_discoveredDevices);
+  BleDevice? get targetDevice => _targetDevice;
   String get deviceName => _deviceName;
   String get serialNumber => _serialNumber;
   String get firmwareVersion => _firmwareVersion;
@@ -91,7 +96,9 @@ class WhoopBleManager extends ChangeNotifier {
         _liveRrMs = [];
         _isOnWrist = false;
         _setConnectionState(StrapConnectionState.disconnected);
-        _reconnectWithBackoff();
+        if (_targetDevice != null) {
+          _reconnectWithBackoff();
+        }
       }
     };
 
@@ -110,24 +117,17 @@ class WhoopBleManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Scans for and connects to the WHOOP strap.
-  Future<void> connect({String? specificAddress}) async {
-    if (_connectionState == StrapConnectionState.connected) return;
+  /// Starts scanning for devices without auto-connecting, letting the user choose.
+  Future<void> startScan() async {
+    if (_connectionState == StrapConnectionState.connected ||
+        _connectionState == StrapConnectionState.connecting) {
+      return;
+    }
 
+    _discoveredDevices.clear();
     _setConnectionState(StrapConnectionState.scanning);
 
-    UniversalBle.onScanResult = (device) {
-      String name = device.name ?? '';
-      bool matchName = name.toUpperCase().contains('WHOOP');
-      bool matchAddress = specificAddress != null &&
-          device.deviceId.toUpperCase() == specificAddress.toUpperCase();
-
-      if (matchName || matchAddress) {
-        UniversalBle.stopScan();
-        _targetDevice = device;
-        _connectToDevice(device);
-      }
-    };
+    UniversalBle.onScanResult = handleDiscoveredDevice;
 
     try {
       await UniversalBle.startScan();
@@ -137,7 +137,83 @@ class WhoopBleManager extends ChangeNotifier {
     }
   }
 
-  /// Disconnects manually, resets live state, and clears target device.
+  /// Handles incoming BLE discovery without auto-connecting.
+  void handleDiscoveredDevice(BleDevice device) {
+    String name = (device.name ?? '').trim();
+    bool matchName = name.toUpperCase().contains('WHOOP');
+    bool matchService = false;
+    if (device.services != null) {
+      matchService = device.services!.any((s) => s.toLowerCase().contains('fd4b'));
+    }
+
+    // Record any device that is a WHOOP or broadcasts an identifiable name
+    if (matchName || matchService || name.isNotEmpty) {
+      int idx = _discoveredDevices.indexWhere(
+        (d) => d.deviceId.toUpperCase() == device.deviceId.toUpperCase(),
+      );
+      if (idx >= 0) {
+        _discoveredDevices[idx] = device;
+      } else {
+        // Prioritize WHOOP straps at the top of the list
+        if (matchName || matchService) {
+          _discoveredDevices.insert(0, device);
+        } else {
+          _discoveredDevices.add(device);
+        }
+      }
+      notifyListeners();
+    }
+  }
+
+  /// Stops ongoing scan.
+  Future<void> stopScan() async {
+    try {
+      await UniversalBle.stopScan();
+    } catch (_) {}
+    if (_connectionState == StrapConnectionState.scanning) {
+      _setConnectionState(StrapConnectionState.disconnected);
+    }
+  }
+
+  /// Connects explicitly to the user-selected device.
+  Future<void> connectToDevice(BleDevice device) async {
+    try {
+      await UniversalBle.stopScan();
+    } catch (_) {}
+    await _connectToDevice(device);
+  }
+
+  /// Scans for devices. If [specificAddress] is provided, connects automatically upon discovery.
+  /// If null, begins scanning and lets the user choose the device from [discoveredDevices].
+  Future<void> connect({String? specificAddress}) async {
+    if (_connectionState == StrapConnectionState.connected ||
+        _connectionState == StrapConnectionState.connecting) {
+      return;
+    }
+
+    if (specificAddress != null) {
+      _setConnectionState(StrapConnectionState.scanning);
+      UniversalBle.onScanResult = (device) {
+        bool match = device.deviceId.toUpperCase() == specificAddress.toUpperCase() ||
+            (device.name ?? '').toUpperCase().contains(specificAddress.toUpperCase());
+        if (match) {
+          UniversalBle.stopScan();
+          _targetDevice = device;
+          _connectToDevice(device);
+        }
+      };
+      try {
+        await UniversalBle.startScan();
+      } catch (e) {
+        debugPrint('[BLE] Start scan error: $e');
+        _setConnectionState(StrapConnectionState.disconnected);
+      }
+    } else {
+      await startScan();
+    }
+  }
+
+  /// Disconnects manually, resets live state, and clears target device and scan list.
   Future<void> disconnect() async {
     try {
       await UniversalBle.stopScan();
@@ -150,6 +226,7 @@ class WhoopBleManager extends ChangeNotifier {
       }
     }
     _targetDevice = null;
+    _discoveredDevices.clear();
     _liveHr = 0;
     _liveRrMs = [];
     _opticalBaseline = 0;
@@ -163,10 +240,11 @@ class WhoopBleManager extends ChangeNotifier {
     try {
       await UniversalBle.connect(device.deviceId);
       _targetDevice = device;
-      _deviceName = device.name ?? 'WHOOP 5WP';
+      _deviceName = device.name ?? 'WHOOP Strap';
 
       // Discover services & subscribe
-      await UniversalBle.discoverServices(device.deviceId); await Future.delayed(const Duration(milliseconds: 500));
+      await UniversalBle.discoverServices(device.deviceId);
+      await Future.delayed(const Duration(milliseconds: 500));
       await _subscribeNotifications(device.deviceId);
 
       // Perform handshake & unlock session
@@ -278,36 +356,54 @@ class WhoopBleManager extends ChangeNotifier {
           withoutResponse: false,
         );
 
-        var result = await _pendingCmdCompleter!.future.timeout(timeout);
-        execCompleter.complete(result);
+        // Await response with timeout
+        var resp = await _pendingCmdCompleter!.future.timeout(
+          timeout,
+          onTimeout: () => throw TimeoutException('Command 0x${cmd.toRadixString(16)} timeout'),
+        );
+        execCompleter.complete(resp);
       } catch (e) {
+        debugPrint('[BLE] sendCommand error: $e');
         execCompleter.complete(null);
       } finally {
         _pendingCmdCompleter = null;
+        _isSending = false;
+        _processNextCommand();
       }
     });
 
-    _processQueue();
+    if (!_isSending) {
+      _processNextCommand();
+    }
+
     return execCompleter.future;
   }
 
-  void _processQueue() async {
-    if (_isSending || _commandQueue.isEmpty) return;
+  void _processNextCommand() {
+    if (_commandQueue.isEmpty || _isSending) return;
     _isSending = true;
-    var task = _commandQueue.removeAt(0);
-    try {
-      await task();
-    } finally {
-      _isSending = false;
-      if (_commandQueue.isNotEmpty) {
-        _processQueue();
-      }
-    }
+    var nextTask = _commandQueue.removeAt(0);
+    nextTask();
   }
 
-  /// Starts high-speed historical offload (0x16) with progress monitoring.
+  /// Sends 0x42 Alarm Vibration command (Duration up to 5000ms, pattern 0 or 1).
+  Future<bool> sendAlarmVibration({int pattern = 1, int durationMs = 1500}) async {
+    if (_targetDevice == null || _connectionState != StrapConnectionState.connected) {
+      return false;
+    }
+    ByteData bd = ByteData(3);
+    bd.setUint8(0, pattern & 0xFF);
+    bd.setUint16(1, durationMs & 0xFFFF, Endian.little);
+    var resp = await sendCommand(PuffinOpcodes.alarmControl, params: bd.buffer.asUint8List());
+    return resp != null && resp.isSuccess;
+  }
+
+  /// High-throughput Turbo-Sync historical data offload.
   Future<void> startHistoricalSync({int durationSeconds = 30}) async {
-    if (_isSyncing) return;
+    if (_targetDevice == null || _connectionState != StrapConnectionState.connected) {
+      return;
+    }
+
     _isSyncing = true;
     _syncProgress = 0.0;
     _syncTotalPackets = 0;
@@ -315,86 +411,73 @@ class WhoopBleManager extends ChangeNotifier {
     _syncSpeed = 0.0;
     notifyListeners();
 
-    try {
-      // 1. Query Range 0x22
-      await sendCommand(PuffinOpcodes.getDataRange, b3: 0x00);
+    int startTs = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    int targetEndTs = startTs + durationSeconds;
 
-      // 2. Trigger offload 0x16
-      await sendCommand(PuffinOpcodes.sendHistorical, b3: 0x00);
+    ByteData bd = ByteData(4);
+    bd.setUint32(0, targetEndTs, Endian.little);
+    await sendCommand(
+      PuffinOpcodes.sendHistorical,
+      b3: 0x00,
+      params: bd.buffer.asUint8List(),
+      timeout: const Duration(seconds: 5),
+    );
 
-      // Progress countdown
-      int elapsed = 0;
-      DateTime start = DateTime.now();
+    // Monitor progress
+    int elapsed = 0;
+    Timer.periodic(const Duration(seconds: 1), (timer) {
+      elapsed++;
+      _syncProgress = (elapsed / durationSeconds).clamp(0.0, 1.0);
+      if (elapsed > 0) {
+        _syncSpeed = double.parse((_syncTotalPackets / elapsed).toStringAsFixed(1));
+      }
+      notifyListeners();
 
-      while (elapsed < durationSeconds && _isSyncing) {
-        await Future.delayed(const Duration(seconds: 1));
-        elapsed++;
-        _syncProgress = elapsed / durationSeconds;
-        double sec = DateTime.now().difference(start).inMilliseconds / 1000.0;
-        if (sec > 0) {
-          _syncSpeed = (_syncTotalPackets / sec * 10).round() / 10.0;
-        }
+      if (elapsed >= durationSeconds || !_isSyncing) {
+        timer.cancel();
+        _isSyncing = false;
+        _flushV18Buffer();
         notifyListeners();
       }
-    } finally {
-      await _flushV18Buffer();
-      _isSyncing = false;
-      _syncProgress = 1.0;
-      notifyListeners();
-    }
+    });
   }
 
-  /// Sends 0x42 ALARM_CONTROL vibration test to the physical strap.
-  Future<bool> sendAlarmVibration({int pattern = 1, int durationMs = 1000}) async {
-    try {
-      Uint8List frame = _cmdBuilder.buildAlarmControl(pattern: pattern, durationMs: durationMs);
-      if (_targetDevice != null) {
-        await UniversalBle.write(
-          _targetDevice!.deviceId,
-          puffinServiceUuid,
-          charCmdTx,
-          frame,
-          withoutResponse: false,
-        );
-        return true;
-      }
-    } catch (e) {
-      debugPrint('[BLE] Alarm vibration error: $e');
-    }
-    return false;
+  void stopHistoricalSync() {
+    _isSyncing = false;
+    _flushV18Buffer();
+    notifyListeners();
   }
 
+  /// Inbound characteristic multiplexer.
   void _handleIncomingData(String charId, Uint8List rawChunk) {
     if (charId.contains('fd4b0003')) {
-      // Command Response RX
-      List<Uint8List> frames = _cmdReassembler.feed(rawChunk);
+      // Command Responses (0x24)
+      var frames = _cmdReassembler.feed(rawChunk);
       for (var f in frames) {
         Uint8List inner = extractInnerPayload(f);
         var resp = PuffinDecoder.decodeResponse0x24(inner);
-        if (resp != null && !resp.isInProgress) {
-          if (_pendingCmdCompleter != null && !_pendingCmdCompleter!.isCompleted) {
-            _pendingCmdCompleter!.complete(resp);
-          }
+        if (resp != null && _pendingCmdCompleter != null && !_pendingCmdCompleter!.isCompleted) {
+          _pendingCmdCompleter!.complete(resp);
         }
       }
     } else if (charId.contains('fd4b0005')) {
       // Data Stream (0x28 live, 0x2F v18, 0x31 cursor)
-      List<Uint8List> frames = _streamReassembler.feed(rawChunk);
+      var frames = _streamReassembler.feed(rawChunk);
       for (var f in frames) {
+        _syncTotalPackets++;
         Uint8List inner = extractInnerPayload(f);
-        if (inner.isEmpty) continue;
-        int opcode = inner[0];
+        int opcode = inner.isNotEmpty ? inner[0] : 0;
 
         if (opcode == 0x28) {
-          // Live Heart Rate
+          // Live Heart Rate packet
           var live = PuffinDecoder.decodeLiveHr0x28(inner);
           if (live != null) {
             _liveHr = live.primaryHr;
+            _isOnWrist = true;
             notifyListeners();
           }
         } else if (opcode == 0x2F) {
-          // Historical Record v18
-          _syncTotalPackets++;
+          // Historical v18 record
           var v18 = PuffinDecoder.decodeHistoricalV18(inner);
           if (v18 != null) {
             _isOnWrist = v18.isOnWrist;
@@ -471,7 +554,7 @@ class WhoopBleManager extends ChangeNotifier {
   void _reconnectWithBackoff() async {
     if (_targetDevice == null) return;
     await Future.delayed(const Duration(seconds: 3));
-    if (_connectionState == StrapConnectionState.disconnected) {
+    if (_connectionState == StrapConnectionState.disconnected && _targetDevice != null) {
       _connectToDevice(_targetDevice!);
     }
   }

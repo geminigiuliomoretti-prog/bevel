@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:universal_ble/universal_ble.dart';
 import '../transport/ble_manager.dart';
 import '../biometrics/dsp_engine.dart';
 import 'theme.dart';
@@ -41,7 +42,7 @@ class HomeTab extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Device Status Card
+          // Device Status & Interactive Discovery Card
           _buildDeviceStatusCard(context, ble),
           const SizedBox(height: 16),
 
@@ -91,7 +92,7 @@ class HomeTab extends StatelessWidget {
         stateColor = WhoopColors.strainBlue;
         badgeText = 'SEARCHING';
         badgeColor = WhoopColors.strainBlue;
-        subtitleText = 'Scanning for WHOOP strap over BLE...';
+        subtitleText = 'Scanning for WHOOP straps over BLE...';
         break;
       case StrapConnectionState.disconnected:
         stateText = 'DISCONNECTED';
@@ -110,6 +111,7 @@ class HomeTab extends StatelessWidget {
         border: Border.all(color: WhoopColors.surfaceBorder),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
@@ -218,13 +220,14 @@ class HomeTab extends StatelessWidget {
           const SizedBox(height: 12),
           const Divider(color: WhoopColors.surfaceBorder, height: 1),
           const SizedBox(height: 10),
-          // Manual Connection Controls
+
+          // 1. DISCONNECTED: Prominent button to start scanning
           if (ble.connectionState == StrapConnectionState.disconnected)
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: () => ble.connect(),
-                icon: const Icon(Icons.bluetooth, size: 18, color: Colors.black),
+                onPressed: () => ble.startScan(),
+                icon: const Icon(Icons.bluetooth_searching, size: 18, color: Colors.black),
                 label: const Text(
                   'CONNECT STRAP',
                   style: TextStyle(
@@ -241,29 +244,148 @@ class HomeTab extends StatelessWidget {
                 ),
               ),
             )
-          else if (ble.connectionState == StrapConnectionState.connected)
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => ble.disconnect(),
-                icon: const Icon(Icons.bluetooth_disabled, size: 16, color: WhoopColors.red),
-                label: const Text(
-                  'DISCONNECT STRAP',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.8,
-                    fontSize: 12,
-                    color: WhoopColors.red,
+
+          // 2. SCANNING: Show real-time device discovery list with explicit CONNECT buttons
+          else if (ble.connectionState == StrapConnectionState.scanning) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: const [
+                    SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: WhoopColors.strainBlue),
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'AVAILABLE WHOOP STRAPS',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.8,
+                        color: WhoopColors.strainBlue,
+                      ),
+                    ),
+                  ],
+                ),
+                TextButton(
+                  onPressed: () => ble.stopScan(),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    foregroundColor: WhoopColors.textMuted,
                   ),
+                  child: const Text('CANCEL SCAN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                 ),
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: WhoopColors.red.withValues(alpha: 0.4)),
-                  minimumSize: const Size.fromHeight(40),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ],
+            ),
+            const SizedBox(height: 6),
+            if (ble.discoveredDevices.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                decoration: BoxDecoration(
+                  color: WhoopColors.surfaceHighlight,
+                  borderRadius: BorderRadius.circular(8),
                 ),
+                child: const Text(
+                  'Searching for nearby WHOOP devices...\nMake sure your strap is awake and in pairing range.',
+                  style: TextStyle(fontSize: 12, color: WhoopColors.textSecondary),
+                ),
+              )
+            else
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: ble.discoveredDevices.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, idx) {
+                  final BleDevice device = ble.discoveredDevices[idx];
+                  final String name = (device.name ?? '').isNotEmpty ? device.name! : 'Unknown Device';
+                  final bool isWhoop = name.toUpperCase().contains('WHOOP');
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: WhoopColors.surfaceHighlight,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isWhoop ? WhoopColors.green.withValues(alpha: 0.4) : WhoopColors.surfaceBorder,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.watch,
+                          color: isWhoop ? WhoopColors.green : WhoopColors.textMuted,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13,
+                                        color: WhoopColors.textPrimary,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (isWhoop) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: WhoopColors.green.withValues(alpha: 0.2),
+                                        borderRadius: BorderRadius.circular(3),
+                                      ),
+                                      child: const Text(
+                                        'WHOOP',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                          color: WhoopColors.green,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${device.deviceId}${device.rssi != null ? " • RSSI: ${device.rssi} dBm" : ""}',
+                                style: const TextStyle(fontSize: 11, color: WhoopColors.textSecondary),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => ble.connectToDevice(device),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: WhoopColors.green,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            minimumSize: const Size(72, 32),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                          ),
+                          child: const Text('CONNECT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
-            )
-          else
+          ]
+
+          // 3. CONNECTING: Connecting to chosen strap
+          else if (ble.connectionState == StrapConnectionState.connecting)
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -271,12 +393,10 @@ class HomeTab extends StatelessWidget {
                 icon: const SizedBox(
                   width: 14,
                   height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: WhoopColors.strainBlue),
+                  child: CircularProgressIndicator(strokeWidth: 2, color: WhoopColors.yellow),
                 ),
                 label: Text(
-                  ble.connectionState == StrapConnectionState.scanning
-                      ? 'SCANNING BLE... (TAP TO CANCEL)'
-                      : 'CONNECTING... (TAP TO CANCEL)',
+                  'CONNECTING TO ${ble.deviceName}... (CANCEL)',
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     letterSpacing: 0.8,
@@ -290,7 +410,59 @@ class HomeTab extends StatelessWidget {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
+            )
+
+          // 4. CONNECTED: Connected options (Disconnect or Switch strap)
+          else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => ble.disconnect(),
+                    icon: const Icon(Icons.bluetooth_disabled, size: 16, color: WhoopColors.red),
+                    label: const Text(
+                      'DISCONNECT',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.8,
+                        fontSize: 12,
+                        color: WhoopColors.red,
+                      ),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: WhoopColors.red.withValues(alpha: 0.4)),
+                      minimumSize: const Size.fromHeight(40),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      await ble.disconnect();
+                      await ble.startScan();
+                    },
+                    icon: const Icon(Icons.swap_horiz, size: 16, color: WhoopColors.strainBlue),
+                    label: const Text(
+                      'SWITCH STRAP',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.8,
+                        fontSize: 12,
+                        color: WhoopColors.strainBlue,
+                      ),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: WhoopColors.strainBlue.withValues(alpha: 0.4)),
+                      minimumSize: const Size.fromHeight(40),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+              ],
             ),
+          ],
         ],
       ),
     );
@@ -685,7 +857,7 @@ class HomeTab extends StatelessWidget {
                           if (!isConnected) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Strap not connected. Tap CONNECT STRAP above to start.'),
+                                content: Text('Strap not connected. Tap CONNECT STRAP above to choose your device.'),
                                 duration: Duration(seconds: 2),
                                 backgroundColor: WhoopColors.red,
                               ),
