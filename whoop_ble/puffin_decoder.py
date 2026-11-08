@@ -368,8 +368,11 @@ def decode_cursor_metadata_0x31(inner: bytes) -> Dict[str, Any]:
 
     cursor_hex: Optional[str] = None
     # Il cursore reale a 8 byte nel pacchetto 0x31 si trova all'offset inner[13:21]
-    if len(inner) >= 20:
+    if len(inner) >= 21:
         cursor_bytes = inner[13:21]
+        cursor_hex = cursor_bytes.hex().upper()
+    elif len(inner) >= 13:
+        cursor_bytes = inner[5:13]
         cursor_hex = cursor_bytes.hex().upper()
 
     return {

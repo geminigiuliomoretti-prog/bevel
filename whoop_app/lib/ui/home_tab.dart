@@ -529,7 +529,7 @@ class HomeTab extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    hasData ? '${recovery.score}%' : '--%',
+                    hasData ? '${recovery.score}%' : '--',
                     style: TextStyle(
                       fontSize: 44,
                       fontWeight: FontWeight.w900,
@@ -553,9 +553,9 @@ class HomeTab extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildRecoverySubStat('HRV (RMSSD)', recovery.rmssd > 0 ? '${recovery.rmssd} ms' : '-- ms'),
-              _buildRecoverySubStat('RESTING HR', recovery.rhr > 0 ? '${recovery.rhr.toStringAsFixed(1)} BPM' : '-- BPM'),
-              _buildRecoverySubStat('SKIN TEMP', recovery.skinTempDelta != 0.0 ? '${recovery.skinTempDelta >= 0 ? '+' : ''}${recovery.skinTempDelta}°C' : '-- °C'),
+              _buildRecoverySubStat('HRV (RMSSD)', recovery.rmssd > 0 ? '${recovery.rmssd} ms' : '--'),
+              _buildRecoverySubStat('RESTING HR', recovery.rhr > 0 ? '${recovery.rhr.toStringAsFixed(1)} BPM' : '--'),
+              _buildRecoverySubStat('SKIN TEMP', recovery.skinTempDelta != 0.0 ? '${recovery.skinTempDelta >= 0 ? '+' : ''}${recovery.skinTempDelta}°C' : '--'),
             ],
           ),
         ],
@@ -585,7 +585,7 @@ class HomeTab extends StatelessWidget {
         Expanded(
           child: _buildMetricTile(
             title: 'DAY STRAIN',
-            value: strain.score > 0 ? strain.score.toStringAsFixed(1) : '0.0',
+            value: strain.score > 0 ? strain.score.toStringAsFixed(1) : '--',
             unit: '/ 21.0',
             color: WhoopColors.strainBlue,
             icon: Icons.flash_on,
@@ -596,8 +596,8 @@ class HomeTab extends StatelessWidget {
         Expanded(
           child: _buildMetricTile(
             title: 'SLEEP PERF',
-            value: sleep.totalSleepHours > 0 ? '${sleep.sleepPerformance.toStringAsFixed(0)}%' : '--%',
-            unit: sleep.totalSleepHours > 0 ? '${sleep.totalSleepHours}h' : '--h',
+            value: sleep.totalSleepHours > 0 ? '${sleep.sleepPerformance.toStringAsFixed(0)}%' : '--',
+            unit: sleep.totalSleepHours > 0 ? '${sleep.totalSleepHours}h' : '',
             color: WhoopColors.sleepTeal,
             icon: Icons.nightlight_round,
             progress: (sleep.sleepPerformance / 100.0).clamp(0.0, 1.0),
@@ -669,11 +669,11 @@ class HomeTab extends StatelessWidget {
   Widget _buildLiveTelemetryCard(WhoopBleManager ble) {
     bool isConnected = ble.connectionState == StrapConnectionState.connected;
     String hrText = isConnected && ble.liveHr > 0 ? '${ble.liveHr}' : '--';
-    String rrText = isConnected && ble.liveRrMs.isNotEmpty ? '${ble.liveRrMs.join(', ')} ms' : '-- ms';
-    String tempText = isConnected && ble.skinTempC > 0 ? '${ble.skinTempC.toStringAsFixed(1)}°C' : '-- °C';
+    String rrText = isConnected && ble.liveRrMs.isNotEmpty ? '${ble.liveRrMs.join(', ')} ms' : '--';
+    String tempText = isConnected && ble.skinTempC > 0 ? '${ble.skinTempC.toStringAsFixed(1)}°C' : '--';
     String baselineText = isConnected && ble.opticalBaseline > 0
         ? 'Optical Baseline: ${ble.opticalBaseline} (${ble.opticalBaseline > 30000 ? "On-Wrist Valid" : "Off-Wrist"})'
-        : 'Optical Baseline: -- (Offline)';
+        : 'Optical Baseline: --';
 
     return Container(
       padding: const EdgeInsets.all(16),

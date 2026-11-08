@@ -140,6 +140,13 @@ class WhoopBleManager extends ChangeNotifier {
   /// Handles incoming BLE discovery without auto-connecting.
   void handleDiscoveredDevice(BleDevice device) {
     String name = (device.name ?? '').trim();
+
+    // STRICT BLACKLIST: Never discover or connect to WHOOP A (5A00479315)
+    if (name.toUpperCase().contains('5A00479315') ||
+        device.deviceId.toUpperCase().contains('5A00479315')) {
+      return;
+    }
+
     bool matchName = name.toUpperCase().contains('WHOOP');
     bool matchService = false;
     if (device.services != null) {
@@ -177,6 +184,13 @@ class WhoopBleManager extends ChangeNotifier {
 
   /// Connects explicitly to the user-selected device.
   Future<void> connectToDevice(BleDevice device) async {
+    String name = (device.name ?? '').trim();
+    if (name.toUpperCase().contains('5A00479315') ||
+        device.deviceId.toUpperCase().contains('5A00479315')) {
+      debugPrint('[BLE] Connection rejected: Target device is blacklisted WHOOP A');
+      return;
+    }
+
     try {
       await UniversalBle.stopScan();
     } catch (_) {}
@@ -194,8 +208,21 @@ class WhoopBleManager extends ChangeNotifier {
     if (specificAddress != null) {
       _setConnectionState(StrapConnectionState.scanning);
       UniversalBle.onScanResult = (device) {
-        bool match = device.deviceId.toUpperCase() == specificAddress.toUpperCase() ||
-            (device.name ?? '').toUpperCase().contains(specificAddress.toUpperCase());
+        String name = (device.name ?? '').trim();
+        // Strict Blacklist WHOOP A
+        if (name.toUpperCase().contains('5A00479315') ||
+            device.deviceId.toUpperCase().contains('5A00479315')) {
+          return;
+        }
+
+        // Match normalized MAC address or specific model name (e.g. 5WP), never fuzzy match general 'WHOOP'
+        String cleanSpecific = specificAddress.replaceAll(':', '').replaceAll('-', '').toUpperCase();
+        String cleanDevId = device.deviceId.replaceAll(':', '').replaceAll('-', '').toUpperCase();
+
+        bool match = cleanDevId.contains(cleanSpecific) ||
+            device.deviceId.toUpperCase().contains(specificAddress.toUpperCase()) ||
+            name.toUpperCase().contains('5WP');
+
         if (match) {
           UniversalBle.stopScan();
           _targetDevice = device;
