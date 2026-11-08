@@ -51,32 +51,44 @@ class _MainScreenState extends State<MainScreen> {
   int _currentTabIndex = 0;
   Timer? _refreshTimer;
 
-  // Biometric States computed from local SQLite
-  RecoveryResult _recovery = BiometricsDspEngine.computeRecovery(
-    rmssd: 78.4,
-    rhr: 50.6,
-    sleepEfficiency: 0.85,
-    skinTempDelta: 0.4,
+  // Genuine initial biometric states (zero / awaiting strap data)
+  RecoveryResult _recovery = RecoveryResult(
+    score: 0,
+    category: RecoveryCategory.yellow,
+    rmssd: 0.0,
+    rhr: 0.0,
+    sleepEfficiency: 0.0,
+    skinTempDelta: 0.0,
   );
 
-  StrainResult _strain = BiometricsDspEngine.computeStrain([
-    52, 54, 55, 58, 61, 60, 58, 55, 53, 52, 51, 50,
-  ]);
+  StrainResult _strain = StrainResult(
+    score: 0.0,
+    maxHr: 0,
+    avgHr: 0.0,
+    zoneSeconds: {'zone1': 0, 'zone2': 0, 'zone3': 0, 'zone4': 0, 'zone5': 0},
+  );
 
-  SleepResult _sleep = BiometricsDspEngine.computeSleep([], [850, 870, 860, 890, 840]);
+  SleepResult _sleep = SleepResult(
+    totalSleepHours: 0.0,
+    sleepPerformance: 0.0,
+    sleepEfficiency: 0.0,
+    deepPercent: 0.0,
+    remPercent: 0.0,
+    lightPercent: 0.0,
+    awakePercent: 0.0,
+    respiratoryRate: 0.0,
+  );
 
-  StressResult _stress = BiometricsDspEngine.computeRealTimeStress(
-    currentHr: 54,
-    currentRmssd: 78.4,
-    motionDeltaG: 0.02,
+  StressResult _stress = StressResult(
+    stressScore: 0.0,
+    label: 'NO DATA',
+    motionDecoupled: false,
   );
 
   @override
   void initState() {
     super.initState();
-    // Auto-connect to physical WHOOP B
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      WhoopBleManager.instance.connect(specificAddress: 'FD:49:44:66:1D:92');
       _loadBiometricsFromDatabase();
     });
 
@@ -100,28 +112,41 @@ class _MainScreenState extends State<MainScreen> {
         List<int> hrList = records.map((r) => (r['primary_hr'] as int?) ?? 0).toList();
 
         double rmssd = BiometricsDspEngine.computeRmssd(validRrs);
-        if (rmssd == 0.0) rmssd = 78.4; // Fallback to calibrated physical strap baseline
-
         double rhr = BiometricsDspEngine.computeRhr(hrList);
         double skinTempDelta = 0.0;
         if (records.first['skin_temp_c'] != null) {
           double latestTemp = (records.first['skin_temp_c'] as num).toDouble();
-          skinTempDelta = latestTemp - 30.8;
+          if (latestTemp > 0) {
+            skinTempDelta = latestTemp - 30.8;
+          }
         }
 
         var sleepRes = BiometricsDspEngine.computeSleep(records, validRrs);
-        var recovRes = BiometricsDspEngine.computeRecovery(
-          rmssd: rmssd,
-          rhr: rhr,
-          sleepEfficiency: sleepRes.sleepEfficiency > 0 ? sleepRes.sleepEfficiency : 0.85,
-          skinTempDelta: skinTempDelta,
-        );
+
+        RecoveryResult recovRes;
+        if (rmssd > 0 && rhr > 0) {
+          recovRes = BiometricsDspEngine.computeRecovery(
+            rmssd: rmssd,
+            rhr: rhr,
+            sleepEfficiency: sleepRes.sleepEfficiency > 0 ? sleepRes.sleepEfficiency : 0.70,
+            skinTempDelta: skinTempDelta,
+          );
+        } else {
+          recovRes = RecoveryResult(
+            score: 0,
+            category: RecoveryCategory.yellow,
+            rmssd: rmssd,
+            rhr: rhr,
+            sleepEfficiency: sleepRes.sleepEfficiency,
+            skinTempDelta: skinTempDelta,
+          );
+        }
 
         var strainRes = BiometricsDspEngine.computeStrain(hrList);
 
         int currentHr = WhoopBleManager.instance.liveHr > 0
             ? WhoopBleManager.instance.liveHr
-            : (hrList.isNotEmpty ? hrList.first : 54);
+            : (hrList.isNotEmpty ? hrList.first : 0);
 
         double motionDelta = 0.0;
         if (records.first['movement_delta_g'] != null) {
@@ -130,7 +155,7 @@ class _MainScreenState extends State<MainScreen> {
 
         var stressRes = BiometricsDspEngine.computeRealTimeStress(
           currentHr: currentHr,
-          currentRmssd: rmssd,
+          currentRmssd: rmssd > 0 ? rmssd : 50.0,
           motionDeltaG: motionDelta,
         );
 

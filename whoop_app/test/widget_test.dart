@@ -7,7 +7,22 @@ import 'package:provider/provider.dart';
 import 'package:whoop_app/transport/ble_manager.dart';
 
 void main() {
-  testWidgets('HomeTab UI components smoke test', (WidgetTester tester) async {
+  test('WhoopBleManager zero mock values and disconnect() verification', () async {
+    final ble = WhoopBleManager.instance;
+
+    expect(ble.batteryLevel, equals(0));
+    expect(ble.opticalBaseline, equals(0));
+    expect(ble.skinTempC, equals(0.0));
+    expect(ble.liveRrMs, isEmpty);
+    expect(ble.liveHr, equals(0));
+    expect(ble.isOnWrist, isFalse);
+    expect(ble.connectionState, equals(StrapConnectionState.disconnected));
+
+    await ble.disconnect();
+    expect(ble.connectionState, equals(StrapConnectionState.disconnected));
+  });
+
+  testWidgets('HomeTab UI components smoke test and connect button', (WidgetTester tester) async {
     final recovery = BiometricsDspEngine.computeRecovery(
       rmssd: 78.4,
       rhr: 50.6,
@@ -44,6 +59,9 @@ void main() {
     expect(find.text('LIVE HEART RATE'), findsOneWidget);
     expect(find.text('SYNC FLASH DATA'), findsOneWidget);
     expect(find.text('VIBRATE'), findsOneWidget);
+    expect(find.text('CONNECT STRAP'), findsOneWidget);
+    expect(find.text('DISCONNECTED'), findsOneWidget);
+    expect(find.text('OFFLINE'), findsOneWidget);
 
     WhoopBleManager.instance.cancelTimers();
   });

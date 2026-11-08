@@ -42,7 +42,7 @@ class HomeTab extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Device Status Card
-          _buildDeviceStatusCard(ble),
+          _buildDeviceStatusCard(context, ble),
           const SizedBox(height: 16),
 
           // Recovery Circular Dial
@@ -64,121 +64,243 @@ class HomeTab extends StatelessWidget {
     );
   }
 
-  Widget _buildDeviceStatusCard(WhoopBleManager ble) {
+  Widget _buildDeviceStatusCard(BuildContext context, WhoopBleManager ble) {
     String stateText;
     Color stateColor;
+    String badgeText;
+    Color badgeColor;
+    String subtitleText;
+
     switch (ble.connectionState) {
       case StrapConnectionState.connected:
         stateText = 'CONNECTED 24/7';
         stateColor = WhoopColors.green;
+        badgeText = ble.isOnWrist ? 'ON-WRIST' : 'OFF-WRIST';
+        badgeColor = ble.isOnWrist ? WhoopColors.green : WhoopColors.red;
+        subtitleText = 'SN: ${ble.serialNumber} • FW: ${ble.firmwareVersion}';
         break;
       case StrapConnectionState.connecting:
         stateText = 'CONNECTING...';
         stateColor = WhoopColors.yellow;
+        badgeText = 'PAIRING';
+        badgeColor = WhoopColors.yellow;
+        subtitleText = 'Unlocking session handshake...';
         break;
       case StrapConnectionState.scanning:
         stateText = 'SCANNING BLE...';
         stateColor = WhoopColors.strainBlue;
+        badgeText = 'SEARCHING';
+        badgeColor = WhoopColors.strainBlue;
+        subtitleText = 'Scanning for WHOOP strap over BLE...';
         break;
       case StrapConnectionState.disconnected:
         stateText = 'DISCONNECTED';
         stateColor = WhoopColors.textMuted;
+        badgeText = 'OFFLINE';
+        badgeColor = WhoopColors.textMuted;
+        subtitleText = 'No strap connected';
         break;
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: WhoopColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: WhoopColors.surfaceBorder),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: stateColor.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(Icons.watch, color: stateColor, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: stateColor.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  ble.connectionState == StrapConnectionState.connected
+                      ? Icons.watch
+                      : (ble.connectionState == StrapConnectionState.disconnected
+                          ? Icons.watch_off_outlined
+                          : Icons.bluetooth_searching),
+                  color: stateColor,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      ble.deviceName,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        color: WhoopColors.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: ble.isOnWrist
-                            ? WhoopColors.green.withValues(alpha: 0.2)
-                            : WhoopColors.red.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        ble.isOnWrist ? 'ON-WRIST' : 'OFF-WRIST',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: ble.isOnWrist ? WhoopColors.green : WhoopColors.red,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            ble.deviceName,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: WhoopColors.textPrimary,
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: badgeColor.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            badgeText,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: badgeColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitleText,
+                      style: const TextStyle(fontSize: 11, color: WhoopColors.textSecondary),
                     ),
                   ],
                 ),
-                Text(
-                  'SN: ${ble.serialNumber} • FW: ${ble.firmwareVersion}',
-                  style: const TextStyle(fontSize: 11, color: WhoopColors.textSecondary),
-                ),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                stateText,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: stateColor,
-                ),
               ),
-              const SizedBox(height: 2),
-              Row(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  const Icon(Icons.battery_charging_full, size: 14, color: WhoopColors.green),
-                  const SizedBox(width: 2),
                   Text(
-                    '${ble.batteryLevel}%',
-                    style: const TextStyle(
-                      fontSize: 12,
+                    stateText,
+                    style: TextStyle(
+                      fontSize: 11,
                       fontWeight: FontWeight.bold,
-                      color: WhoopColors.textPrimary,
+                      color: stateColor,
                     ),
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Icon(
+                        ble.connectionState == StrapConnectionState.connected && ble.batteryLevel > 0
+                            ? Icons.battery_charging_full
+                            : Icons.battery_unknown,
+                        size: 14,
+                        color: ble.connectionState == StrapConnectionState.connected && ble.batteryLevel > 0
+                            ? WhoopColors.green
+                            : WhoopColors.textMuted,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        ble.connectionState == StrapConnectionState.connected && ble.batteryLevel > 0
+                            ? '${ble.batteryLevel}%'
+                            : '--%',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: ble.connectionState == StrapConnectionState.connected && ble.batteryLevel > 0
+                              ? WhoopColors.textPrimary
+                              : WhoopColors.textMuted,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          const Divider(color: WhoopColors.surfaceBorder, height: 1),
+          const SizedBox(height: 10),
+          // Manual Connection Controls
+          if (ble.connectionState == StrapConnectionState.disconnected)
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => ble.connect(),
+                icon: const Icon(Icons.bluetooth, size: 18, color: Colors.black),
+                label: const Text(
+                  'CONNECT STRAP',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                    fontSize: 13,
+                    color: Colors.black,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: WhoopColors.green,
+                  minimumSize: const Size.fromHeight(40),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            )
+          else if (ble.connectionState == StrapConnectionState.connected)
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => ble.disconnect(),
+                icon: const Icon(Icons.bluetooth_disabled, size: 16, color: WhoopColors.red),
+                label: const Text(
+                  'DISCONNECT STRAP',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                    fontSize: 12,
+                    color: WhoopColors.red,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: WhoopColors.red.withValues(alpha: 0.4)),
+                  minimumSize: const Size.fromHeight(40),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            )
+          else
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => ble.disconnect(),
+                icon: const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: WhoopColors.strainBlue),
+                ),
+                label: Text(
+                  ble.connectionState == StrapConnectionState.scanning
+                      ? 'SCANNING BLE... (TAP TO CANCEL)'
+                      : 'CONNECTING... (TAP TO CANCEL)',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                    fontSize: 12,
+                    color: WhoopColors.textPrimary,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: WhoopColors.surfaceBorder),
+                  minimumSize: const Size.fromHeight(40),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 
   Widget _buildRecoveryDialCard(Color recoveryColor) {
+    final bool hasData = recovery.score > 0;
+    final displayColor = hasData ? recoveryColor : WhoopColors.textMuted;
+    final catName = hasData ? recovery.category.name.toUpperCase() : 'NO DATA';
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -203,15 +325,15 @@ class HomeTab extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: recoveryColor.withValues(alpha: 0.2),
+                  color: displayColor.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  recovery.category.name.toUpperCase(),
+                  catName,
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: recoveryColor,
+                    color: displayColor,
                   ),
                 ),
               ),
@@ -225,26 +347,26 @@ class HomeTab extends StatelessWidget {
                 width: 170,
                 height: 170,
                 child: CircularProgressIndicator(
-                  value: recovery.score / 100.0,
+                  value: hasData ? recovery.score / 100.0 : 0.0,
                   strokeWidth: 14,
                   backgroundColor: WhoopColors.surfaceHighlight,
-                  valueColor: AlwaysStoppedAnimation<Color>(recoveryColor),
+                  valueColor: AlwaysStoppedAnimation<Color>(displayColor),
                 ),
               ),
               Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    '${recovery.score}%',
+                    hasData ? '${recovery.score}%' : '--%',
                     style: TextStyle(
                       fontSize: 44,
                       fontWeight: FontWeight.w900,
-                      color: recoveryColor,
+                      color: displayColor,
                     ),
                   ),
-                  const Text(
-                    'AUTONOMIC READINESS',
-                    style: TextStyle(
+                  Text(
+                    hasData ? 'AUTONOMIC READINESS' : 'AWAITING DATA',
+                    style: const TextStyle(
                       fontSize: 9,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.8,
@@ -259,9 +381,9 @@ class HomeTab extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildRecoverySubStat('HRV (RMSSD)', '${recovery.rmssd} ms'),
-              _buildRecoverySubStat('RESTING HR', '${recovery.rhr.toStringAsFixed(1)} BPM'),
-              _buildRecoverySubStat('SKIN TEMP', '${recovery.skinTempDelta >= 0 ? '+' : ''}${recovery.skinTempDelta}°C'),
+              _buildRecoverySubStat('HRV (RMSSD)', recovery.rmssd > 0 ? '${recovery.rmssd} ms' : '-- ms'),
+              _buildRecoverySubStat('RESTING HR', recovery.rhr > 0 ? '${recovery.rhr.toStringAsFixed(1)} BPM' : '-- BPM'),
+              _buildRecoverySubStat('SKIN TEMP', recovery.skinTempDelta != 0.0 ? '${recovery.skinTempDelta >= 0 ? '+' : ''}${recovery.skinTempDelta}°C' : '-- °C'),
             ],
           ),
         ],
@@ -291,19 +413,19 @@ class HomeTab extends StatelessWidget {
         Expanded(
           child: _buildMetricTile(
             title: 'DAY STRAIN',
-            value: strain.score.toStringAsFixed(1),
+            value: strain.score > 0 ? strain.score.toStringAsFixed(1) : '0.0',
             unit: '/ 21.0',
             color: WhoopColors.strainBlue,
             icon: Icons.flash_on,
-            progress: strain.score / 21.0,
+            progress: (strain.score / 21.0).clamp(0.0, 1.0),
           ),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: _buildMetricTile(
             title: 'SLEEP PERF',
-            value: '${sleep.sleepPerformance.toStringAsFixed(0)}%',
-            unit: '${sleep.totalSleepHours}h',
+            value: sleep.totalSleepHours > 0 ? '${sleep.sleepPerformance.toStringAsFixed(0)}%' : '--%',
+            unit: sleep.totalSleepHours > 0 ? '${sleep.totalSleepHours}h' : '--h',
             color: WhoopColors.sleepTeal,
             icon: Icons.nightlight_round,
             progress: (sleep.sleepPerformance / 100.0).clamp(0.0, 1.0),
@@ -373,7 +495,13 @@ class HomeTab extends StatelessWidget {
   }
 
   Widget _buildLiveTelemetryCard(WhoopBleManager ble) {
-    String rrText = ble.liveRrMs.isNotEmpty ? '${ble.liveRrMs.join(', ')} ms' : '-- ms';
+    bool isConnected = ble.connectionState == StrapConnectionState.connected;
+    String hrText = isConnected && ble.liveHr > 0 ? '${ble.liveHr}' : '--';
+    String rrText = isConnected && ble.liveRrMs.isNotEmpty ? '${ble.liveRrMs.join(', ')} ms' : '-- ms';
+    String tempText = isConnected && ble.skinTempC > 0 ? '${ble.skinTempC.toStringAsFixed(1)}°C' : '-- °C';
+    String baselineText = isConnected && ble.opticalBaseline > 0
+        ? 'Optical Baseline: ${ble.opticalBaseline} (${ble.opticalBaseline > 30000 ? "On-Wrist Valid" : "Off-Wrist"})'
+        : 'Optical Baseline: -- (Offline)';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -432,7 +560,7 @@ class HomeTab extends StatelessWidget {
                     textBaseline: TextBaseline.alphabetic,
                     children: [
                       Text(
-                        ble.liveHr > 0 ? '${ble.liveHr}' : '--',
+                        hrText,
                         style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: WhoopColors.textPrimary),
                       ),
                       const SizedBox(width: 4),
@@ -448,7 +576,11 @@ class HomeTab extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     rrText,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: WhoopColors.green),
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: isConnected && ble.liveRrMs.isNotEmpty ? WhoopColors.green : WhoopColors.textMuted,
+                    ),
                   ),
                 ],
               ),
@@ -458,8 +590,12 @@ class HomeTab extends StatelessWidget {
                   const Text('SKIN TEMP', style: TextStyle(fontSize: 10, color: WhoopColors.textMuted, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 2),
                   Text(
-                    '${ble.skinTempC.toStringAsFixed(1)}°C',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: WhoopColors.yellow),
+                    tempText,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: isConnected && ble.skinTempC > 0 ? WhoopColors.yellow : WhoopColors.textMuted,
+                    ),
                   ),
                 ],
               ),
@@ -472,7 +608,7 @@ class HomeTab extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Optical Baseline: ${ble.opticalBaseline} (${ble.opticalBaseline > 30000 ? "On-Wrist Valid" : "Off-Wrist"})',
+                baselineText,
                 style: const TextStyle(fontSize: 11, color: WhoopColors.textSecondary),
               ),
               Text(
@@ -487,6 +623,8 @@ class HomeTab extends StatelessWidget {
   }
 
   Widget _buildActionsCard(BuildContext context, WhoopBleManager ble) {
+    bool isConnected = ble.connectionState == StrapConnectionState.connected;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -541,7 +679,21 @@ class HomeTab extends StatelessWidget {
               Expanded(
                 flex: 3,
                 child: ElevatedButton.icon(
-                  onPressed: ble.isSyncing ? null : onSyncPressed,
+                  onPressed: ble.isSyncing
+                      ? null
+                      : () {
+                          if (!isConnected) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Strap not connected. Tap CONNECT STRAP above to start.'),
+                                duration: Duration(seconds: 2),
+                                backgroundColor: WhoopColors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          onSyncPressed();
+                        },
                   icon: ble.isSyncing
                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Icon(Icons.sync, color: Colors.black, size: 20),
@@ -555,7 +707,7 @@ class HomeTab extends StatelessWidget {
                     ),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: WhoopColors.green,
+                    backgroundColor: isConnected ? WhoopColors.green : WhoopColors.surfaceHighlight,
                     disabledBackgroundColor: WhoopColors.surfaceHighlight,
                     minimumSize: const Size.fromHeight(46),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -567,6 +719,16 @@ class HomeTab extends StatelessWidget {
                 flex: 2,
                 child: OutlinedButton.icon(
                   onPressed: () async {
+                    if (!isConnected) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Strap not connected'),
+                          duration: Duration(seconds: 2),
+                          backgroundColor: WhoopColors.red,
+                        ),
+                      );
+                      return;
+                    }
                     bool ok = await ble.sendAlarmVibration(pattern: 1, durationMs: 1200);
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(

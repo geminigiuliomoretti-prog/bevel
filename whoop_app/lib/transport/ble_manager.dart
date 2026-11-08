@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:universal_ble/universal_ble.dart';
 import '../protocol/puffin_framing.dart';
@@ -46,15 +46,15 @@ class WhoopBleManager extends ChangeNotifier {
   // Device Info & Live State
   BleDevice? _targetDevice;
   StrapConnectionState _connectionState = StrapConnectionState.disconnected;
-  String _deviceName = 'WHOOP 5WP';
-  String _serialNumber = '5AG0558675';
-  final String _firmwareVersion = '50.41.1.0';
-  int _batteryLevel = 60;
+  String _deviceName = 'WHOOP Strap';
+  String _serialNumber = '--';
+  String _firmwareVersion = '--';
+  int _batteryLevel = 0;
   int _liveHr = 0;
-  bool _isOnWrist = true;
-  int _opticalBaseline = 35400;
-  double _skinTempC = 31.2;
-  List<int> _liveRrMs = [860, 875];
+  bool _isOnWrist = false;
+  int _opticalBaseline = 0;
+  double _skinTempC = 0.0;
+  List<int> _liveRrMs = [];
   bool _isSyncing = false;
   double _syncProgress = 0.0;
   int _syncTotalPackets = 0;
@@ -87,6 +87,9 @@ class WhoopBleManager extends ChangeNotifier {
       if (change.isConnected) {
         _setConnectionState(StrapConnectionState.connected);
       } else {
+        _liveHr = 0;
+        _liveRrMs = [];
+        _isOnWrist = false;
         _setConnectionState(StrapConnectionState.disconnected);
         _reconnectWithBackoff();
       }
@@ -126,7 +129,33 @@ class WhoopBleManager extends ChangeNotifier {
       }
     };
 
-    await UniversalBle.startScan();
+    try {
+      await UniversalBle.startScan();
+    } catch (e) {
+      debugPrint('[BLE] Start scan error: $e');
+      _setConnectionState(StrapConnectionState.disconnected);
+    }
+  }
+
+  /// Disconnects manually, resets live state, and clears target device.
+  Future<void> disconnect() async {
+    try {
+      await UniversalBle.stopScan();
+    } catch (_) {}
+    if (_targetDevice != null) {
+      try {
+        await UniversalBle.disconnect(_targetDevice!.deviceId);
+      } catch (e) {
+        debugPrint('[BLE] Disconnect error: $e');
+      }
+    }
+    _targetDevice = null;
+    _liveHr = 0;
+    _liveRrMs = [];
+    _opticalBaseline = 0;
+    _skinTempC = 0.0;
+    _isOnWrist = false;
+    _setConnectionState(StrapConnectionState.disconnected);
   }
 
   Future<void> _connectToDevice(BleDevice device) async {
