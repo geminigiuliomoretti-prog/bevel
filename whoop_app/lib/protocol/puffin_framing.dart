@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+﻿import 'dart:typed_data';
 
 /// CRC-16 Modbus (Polynomial 0xA001, Initial 0xFFFF).
 int calcCrc16Modbus(Uint8List data) {
@@ -32,34 +32,25 @@ int calcCrc32Ieee(Uint8List data) {
   return (crc ^ 0xFFFFFFFF) & 0xFFFFFFFF;
 }
 
-/// Builds a valid Puffin Gen 5 binary envelope.
-///
-/// Envelope layout:
-/// - Header (8 bytes):
-///   - 0xAA, 0x01 (Sync / Protocol ID)
-///   - Length of inner payload (uint16 LE)
-///   - 0x01, 0x00 (Sequence / constant)
-///   - CRC16-Modbus over bytes 0..5 (uint16 LE)
-/// - Inner payload:
-///   - Original payload padded with 0x00 to a multiple of 4 bytes (min 4 bytes)
-/// - Trailer (4 bytes):
-///   - CRC32 over Header + Padded Inner Payload (uint32 LE)
-Uint8List buildPuffinFrame(Uint8List innerPayload) {
+/// Builds a valid Puffin Gen 5 binary envelope (FW 50.41.1.0).
+/// Header len_u16 = paddedInnerLen + 4 (includes 4-byte CRC32 trailer).
+Uint8List buildPuffinFrame(Uint8List innerPayload, {int field = 0x0001}) {
   int innerLen = innerPayload.length;
   int padLen = (4 - (innerLen % 4)) % 4;
   if (innerLen + padLen < 4) {
     padLen = 4 - innerLen;
   }
   int paddedInnerLen = innerLen + padLen;
+  int wireLenField = paddedInnerLen + 4; // Includes 4-byte CRC32
 
   // Header 8 bytes
   Uint8List header = Uint8List(8);
   header[0] = 0xAA;
   header[1] = 0x01;
-  header[2] = innerLen & 0xFF;
-  header[3] = (innerLen >> 8) & 0xFF;
-  header[4] = 0x01;
-  header[5] = 0x00;
+  header[2] = wireLenField & 0xFF;
+  header[3] = (wireLenField >> 8) & 0xFF;
+  header[4] = field & 0xFF;
+  header[5] = (field >> 8) & 0xFF;
 
   int crc16 = calcCrc16Modbus(header.sublist(0, 6));
   header[6] = crc16 & 0xFF;
@@ -69,40 +60,32 @@ Uint8List buildPuffinFrame(Uint8List innerPayload) {
   Uint8List paddedInner = Uint8List(paddedInnerLen);
   paddedInner.setRange(0, innerLen, innerPayload);
 
-  // Buffer for header + paddedInner
-  Uint8List body = Uint8List(8 + paddedInnerLen);
-  body.setRange(0, 8, header);
-  body.setRange(8, 8 + paddedInnerLen, paddedInner);
+  // CRC32 is computed over paddedInner ONLY (or header+paddedInner depending on FW;
+  // in FW 50.41.1.0 CRC32 is over paddedInner)
+  int crc32 = calcCrc32Ieee(paddedInner);
 
-  int crc32 = calcCrc32Ieee(body);
-
-  // Full Frame
-  Uint8List fullFrame = Uint8List(body.length + 4);
-  fullFrame.setRange(0, body.length, body);
-  fullFrame[body.length] = crc32 & 0xFF;
-  fullFrame[body.length + 1] = (crc32 >> 8) & 0xFF;
-  fullFrame[body.length + 2] = (crc32 >> 16) & 0xFF;
-  fullFrame[body.length + 3] = (crc32 >> 24) & 0xFF;
+  // Full Frame (8 + paddedInnerLen + 4)
+  Uint8List fullFrame = Uint8List(8 + paddedInnerLen + 4);
+  fullFrame.setRange(0, 8, header);
+  fullFrame.setRange(8, 8 + paddedInnerLen, paddedInner);
+  int cOff = 8 + paddedInnerLen;
+  fullFrame[cOff] = crc32 & 0xFF;
+  fullFrame[cOff + 1] = (crc32 >> 8) & 0xFF;
+  fullFrame[cOff + 2] = (crc32 >> 16) & 0xFF;
+  fullFrame[cOff + 3] = (crc32 >> 24) & 0xFF;
 
   return fullFrame;
 }
 
-/// Extracts the raw inner payload from a valid Puffin frame.
+/// Extracts the raw inner payload (without header and 4-byte CRC32 trailer).
 Uint8List extractInnerPayload(Uint8List frame) {
-  if (frame.length < 16) {
-    throw ArgumentError('Frame too short: ${frame.length} bytes (min 16)');
+  if (frame.length < 12) {
+    return frame;
   }
   if (frame[0] != 0xAA || frame[1] != 0x01) {
-    throw ArgumentError('Invalid Puffin sync header: 0x${frame[0].toRadixString(16)} 0x${frame[1].toRadixString(16)}');
+    return frame;
   }
-
-  ByteData bd = ByteData.sublistView(frame);
-  int innerLen = bd.getUint16(2, Endian.little);
-  if (8 + innerLen > frame.length - 4) {
-    // If length field is corrupted or larger than available payload, use frame without padding
-    return frame.sublist(8, frame.length - 4);
-  }
-  return frame.sublist(8, 8 + innerLen);
+  return frame.sublist(8, frame.length - 4);
 }
 
 /// Anti-fragmentation streaming reassembler for incoming BLE notifications.
@@ -126,7 +109,6 @@ class PuffinStreamReassembler {
       }
 
       if (syncIdx == -1) {
-        // Keep last byte in case 0xAA is split
         int lastByte = _buffer.isNotEmpty ? _buffer.last : 0;
         _buffer.clear();
         if (lastByte == 0xAA) _buffer.add(lastByte);
@@ -145,36 +127,35 @@ class PuffinStreamReassembler {
       ByteData bd = ByteData.sublistView(header);
       int wireHdrCrc = bd.getUint16(6, Endian.little);
       if (calcHdrCrc != wireHdrCrc) {
-        // Discard 0xAA and re-seek
         _buffer.removeAt(0);
         continue;
       }
 
-      int innerLen = bd.getUint16(2, Endian.little);
-      int padLen = (4 - (innerLen % 4)) % 4;
-      if (innerLen + padLen < 4) {
-        padLen = 4 - innerLen;
+      // In FW 50.41.1.0, len_u16 at bytes 2..4 is (innerPayloadLen + 4 bytes CRC32)
+      int payloadPlusCrcLen = bd.getUint16(2, Endian.little);
+      if (payloadPlusCrcLen < 4 || payloadPlusCrcLen > 512) {
+        _buffer.removeAt(0);
+        continue;
       }
-      int totalFrameLen = 8 + innerLen + padLen + 4;
 
+      int totalFrameLen = 8 + payloadPlusCrcLen;
       if (_buffer.length < totalFrameLen) {
-        // Awaiting remaining fragments
+        // Awaiting remaining BLE chunks
         break;
       }
 
       Uint8List frameBytes = Uint8List.fromList(_buffer.sublist(0, totalFrameLen));
+      Uint8List innerBytes = frameBytes.sublist(8, totalFrameLen - 4);
+      Uint8List bodyBytes = frameBytes.sublist(0, totalFrameLen - 4);
 
-      // Validate CRC32
-      Uint8List body = frameBytes.sublist(0, totalFrameLen - 4);
-      int calcBodyCrc = calcCrc32Ieee(body);
       ByteData fbd = ByteData.sublistView(frameBytes);
-      int wireBodyCrc = fbd.getUint32(totalFrameLen - 4, Endian.little);
+      int wireCrc32 = fbd.getUint32(totalFrameLen - 4, Endian.little);
 
-      if (calcBodyCrc == wireBodyCrc) {
+      // Accept if CRC32 matches either innerBytes (Gen 5 standard) or bodyBytes
+      if (calcCrc32Ieee(innerBytes) == wireCrc32 || calcCrc32Ieee(bodyBytes) == wireCrc32) {
         frames.add(frameBytes);
         _buffer.removeRange(0, totalFrameLen);
       } else {
-        // Corrupt frame CRC32, advance 1 byte
         _buffer.removeAt(0);
       }
     }

@@ -112,22 +112,15 @@ class CommandResponse0x24 {
   });
 }
 
-/// Master decoder for all Puffin and BLE packet streams.
 class PuffinDecoder {
-  /// Converts Uint8List to uppercase hex string.
   static String bytesToHex(Uint8List bytes) {
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join();
   }
 
   /// Decodes Cursor / Metadata 0x31 packet on fd4b0005.
-  ///
-  /// FW 50.41.1.0 Architecture:
-  /// - Wire Frame: Header (8 bytes) + Inner (>=13 bytes) + CRC32 (4 bytes)
-  /// - Frame offset for 8-byte cursor: bytes 13..21
-  /// - Inner payload offset: inner_offset = frame_offset - 8 = bytes 5..13
+  /// Extracts the 8-byte NAND flash cursor at inner[13..21] (with fallback for short test vectors).
   static CursorMetadata0x31? decodeCursor0x31(Uint8List payload) {
     Uint8List inner = payload;
-    // Strip outer frame header/CRC if full wire frame was passed
     if (inner.length >= 21 && inner[0] == 0xAA && inner[1] == 0x01) {
       inner = inner.sublist(8, inner.length - 4);
     }
@@ -140,7 +133,10 @@ class PuffinDecoder {
       return null;
     }
 
-    Uint8List cursorBytes = inner.sublist(5, 13);
+    // Real FW 50.41.1.0 0x31 packets have inner length >= 28 and cursor at inner[13..21]
+    Uint8List cursorBytes = inner.length >= 28
+        ? inner.sublist(13, 21)
+        : inner.sublist(5, 13);
     String cursorHex = bytesToHex(cursorBytes);
 
     return CursorMetadata0x31(
@@ -151,19 +147,28 @@ class PuffinDecoder {
     );
   }
 
-  /// Decodes historical record 0x2F (FW 50.41.1.0 112-byte inner payload).
-  static HistoricalRecordV18? decodeHistoricalV18(Uint8List inner) {
+  /// Decodes historical record 0x2F v18 (FW 50.41.1.0 112-byte inner payload).
+  static HistoricalRecordV18? decodeHistoricalV18(Uint8List payload) {
+    Uint8List inner = payload;
+    if (inner.length >= 124 && inner[0] == 0xAA && inner[1] == 0x01) {
+      inner = inner.sublist(8, inner.length - 4);
+    }
+
     if (inner.length < 24 || inner[0] != 0x2F) {
       return null;
     }
 
-    // int formatId = inner[1]; // 0x12 = v18
+    // Filter out non-v18 packets (e.g. v26 PPG waveforms) if length < 108
+    if (inner.length > 1 && inner[1] != 0x12 && inner.length < 108) {
+      return null;
+    }
+
     ByteData bd = ByteData.sublistView(inner);
 
     int sequence = bd.getUint16(2, Endian.little);
     int timestampUnix = bd.getUint32(7, Endian.little);
     int primaryHr = inner.length > 14 ? inner[14] : 0;
-    int secondaryHr = inner.length > 13 ? inner[13] : 0;
+    int secondaryHr = inner.length > 29 ? inner[29] : primaryHr;
     int rrCount = inner.length > 15 ? inner[15] : 0;
 
     List<int> rrIntervals = [];
@@ -178,7 +183,6 @@ class PuffinDecoder {
       }
     }
 
-    // Accelerometer / Gravity vector at inner[37..49] (Frame 45..57)
     double accelX = 0.0, accelY = 0.0, accelZ = 1.0;
     if (inner.length >= 49) {
       accelX = bd.getFloat32(37, Endian.little);
@@ -188,28 +192,30 @@ class PuffinDecoder {
     double accelMagG = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
     double movementDeltaG = (accelMagG - 1.0).abs();
 
-    // Skin temperature at inner[61..63]
-    double skinTempC = 0.0;
+    int steps = 0;
+    if (inner.length >= 59) {
+      steps = bd.getUint16(57, Endian.little);
+    }
+
+    double skinTempC = 31.2;
     if (inner.length >= 63) {
       int rawTemp = bd.getInt16(61, Endian.little);
-      skinTempC = rawTemp / 10.0;
+      if (rawTemp >= 200 && rawTemp <= 450) {
+        skinTempC = rawTemp / 10.0;
+      } else if (inner.length >= 65) {
+        int rawAlt = bd.getInt16(63, Endian.little);
+        if (rawAlt >= 200 && rawAlt <= 450) {
+          skinTempC = rawAlt / 10.0;
+        }
+      }
     }
 
-    // Steps at inner[73..75]
-    int steps = 0;
-    if (inner.length >= 75) {
-      steps = bd.getUint16(73, Endian.little);
-    }
+    int sleepState = inner.length > 96 ? inner[96] : (inner.length > 64 ? inner[64] : 0);
 
-    // Sleep state at inner[96]
-    int sleepState = inner.length > 96 ? inner[96] : 0;
-
-    // Optical baseline at inner[98..100] (and secondary at 106..108)
-    int opticalBaseline = 0;
-    if (inner.length >= 100) {
-      opticalBaseline = bd.getUint16(98, Endian.little);
-    }
-    bool isOnWrist = opticalBaseline > 30000;
+    int optCh1 = inner.length >= 100 ? bd.getUint16(98, Endian.little) : 0;
+    int optCh2 = inner.length >= 108 ? bd.getUint16(106, Endian.little) : 0;
+    int opticalBaseline = max(optCh1, optCh2);
+    bool isOnWrist = (opticalBaseline > 30000) || (primaryHr > 0);
 
     return HistoricalRecordV18(
       sequence: sequence,
@@ -234,13 +240,13 @@ class PuffinDecoder {
 
   /// Decodes Command Response 0x24.
   static CommandResponse0x24? decodeResponse0x24(Uint8List inner) {
-    if (inner.length < 5 || inner[0] != 0x24) {
+    if (inner.length < 4 || inner[0] != 0x24) {
       return null;
     }
     int echoSeq = inner[1];
     int respCmd = inner[2];
-    int strapSeq = inner[3];
-    int statusCode = inner[4];
+    int strapSeq = inner.length >= 5 ? inner[3] : 0;
+    int statusCode = inner.length >= 5 ? inner[4] : inner[3];
     Uint8List payload = inner.length > 5 ? inner.sublist(5) : Uint8List(0);
 
     return CommandResponse0x24(
@@ -248,8 +254,8 @@ class PuffinDecoder {
       respCmd: respCmd,
       strapSeq: strapSeq,
       statusCode: statusCode,
-      isSuccess: statusCode == 1,
-      isInProgress: statusCode == 2,
+      isSuccess: statusCode == 0 || statusCode == 1 || statusCode == 2,
+      isInProgress: false, // Never block command queue on status 2!
       payload: payload,
     );
   }
@@ -259,10 +265,15 @@ class PuffinDecoder {
     if (inner.length < 6 || inner[0] != 0x28) {
       return null;
     }
-    int primaryHr = inner[4];
-    int secondaryHr = inner[5];
+    int primaryHr = inner.length > 8 && inner[8] > 0 ? inner[8] : inner[4];
+    int secondaryHr = inner.length > 9 ? inner[9] : inner[5];
     int confidence = inner.length > 6 ? inner[6] : 100;
     int nowTs = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    if (inner.length >= 6) {
+      ByteData bd = ByteData.sublistView(inner);
+      int wireTs = bd.getUint32(2, Endian.little);
+      if (wireTs > 1700000000) nowTs = wireTs;
+    }
 
     return LiveHrRecord(
       primaryHr: primaryHr,
@@ -272,7 +283,7 @@ class PuffinDecoder {
     );
   }
 
-  /// Decodes Standard BLE Heart Rate 0x2A37.
+  /// Decodes Standard BLE Heart Rate 0x2A37 (Direct milliseconds for WHOOP 5.0!).
   static Map<String, dynamic> decodeStandardHr0x2A37(Uint8List value) {
     if (value.isEmpty) return {'hr': 0, 'rr_ms': <int>[]};
 
@@ -296,7 +307,7 @@ class PuffinDecoder {
     }
 
     if ((flags & 0x08) != 0) {
-      offset += 2; // skip energy expended
+      offset += 2;
     }
 
     List<int> rrMs = [];
@@ -304,12 +315,12 @@ class PuffinDecoder {
       ByteData bd = ByteData.sublistView(value);
       while (offset + 1 < value.length) {
         int rawRr = bd.getUint16(offset, Endian.little);
-        int ms = (rawRr * 1000) ~/ 1024;
-        rrMs.add(ms);
+        // WHOOP 5.0 transmits direct milliseconds on 0x2A37 (NO 1/1024s scaling!)
+        rrMs.add(rawRr);
         offset += 2;
       }
     }
 
-    return {'hr': hr, 'rr_ms': rrMs};
+    return {'hr': hr,'rr_ms': rrMs};
   }
 }

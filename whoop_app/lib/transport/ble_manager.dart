@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:universal_ble/universal_ble.dart';
 import '../protocol/puffin_framing.dart';
@@ -137,7 +137,7 @@ class WhoopBleManager extends ChangeNotifier {
       _deviceName = device.name ?? 'WHOOP 5WP';
 
       // Discover services & subscribe
-      await Future.delayed(const Duration(milliseconds: 800));
+      await UniversalBle.discoverServices(device.deviceId); await Future.delayed(const Duration(milliseconds: 500));
       await _subscribeNotifications(device.deviceId);
 
       // Perform handshake & unlock session
